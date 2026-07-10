@@ -41,6 +41,9 @@ class GCSApiClient {
         this.isFetchingLogs = false;
         this.logHistory = [];
         this.maxLogHistory = 200;
+        this.localSerialPort = null;
+        this.serialReader = null;
+        this.serialWriter = null;
     }
 
     startWebSocket() {
@@ -162,31 +165,55 @@ class GCSApiClient {
         }
     }
 // Load Port 
+    // async loadPorts() {
+    //     try {
+    //         const resp = await fetch(this.baseUrl + '/ports');
+    //         const data = await resp.json();
+    //         const select = document.getElementById('portSelect');
+    //         if (!select) return;
+            
+    //         select.innerHTML = '';
+    //         if (!data.ports || data.ports.length === 0) {
+    //             const opt = document.createElement('option');
+    //             opt.text = 'No Port Found';
+    //             opt.value = '';
+    //             select.appendChild(opt);
+    //             return;
+    //         }
+            
+    //         data.ports.forEach((p) => {
+    //             const opt = document.createElement('option');
+    //             opt.text = p.port + ' — ' + (p.description || 'Unknown');
+    //             opt.value = p.port;
+    //             select.appendChild(opt);
+    //         });
+    //         if (data.ports.length > 0) select.value = data.ports[0].port;
+    //     } catch (err) {
+    //         console.error('Load ports error:', err);
+    //     }
+    // }
     async loadPorts() {
+        if (!('serial' in navigator)) {
+            alert('Browser Anda tidak mendukung Web Serial API. Gunakan Chrome atau Edge PC.');
+            return;
+        }
+
         try {
-            const resp = await fetch(this.baseUrl + '/ports');
-            const data = await resp.json();
+            // 1. Munculkan popup bawaan Chrome untuk memilih port laptop
+            this.localSerialPort = await navigator.serial.requestPort();
+            
+            // 2. Ambil informasi port (Chrome membatasi info nama spesifik demi privasi)
+            const portInfo = this.localSerialPort.getInfo();
+            const vendorId = portInfo.usbVendorId ? portInfo.usbVendorId.toString(16) : 'Unknown';
+            
+            // 3. Masukkan port yang baru saja Anda pilih ke dalam dropdown UI yang sudah ada
             const select = document.getElementById('portSelect');
             if (!select) return;
             
-            select.innerHTML = '';
-            if (!data.ports || data.ports.length === 0) {
-                const opt = document.createElement('option');
-                opt.text = 'No Port Found';
-                opt.value = '';
-                select.appendChild(opt);
-                return;
-            }
+            select.innerHTML = `<option value="webserial" selected>Radio Laptop (VID: ${vendorId})</option>`;
             
-            data.ports.forEach((p) => {
-                const opt = document.createElement('option');
-                opt.text = p.port + ' — ' + (p.description || 'Unknown');
-                opt.value = p.port;
-                select.appendChild(opt);
-            });
-            if (data.ports.length > 0) select.value = data.ports[0].port;
         } catch (err) {
-            console.error('Load ports error:', err);
+            console.log('Scan port dibatalkan oleh pengguna:', err);
         }
     }
 
@@ -233,35 +260,107 @@ class GCSApiClient {
         }
     }
 
+    // async connectSerial() {
+    //     this.remoteBackendMode = false;
+    //     const port = document.getElementById('portSelect')?.value;
+    //     const baud = document.getElementById('baudSelect')?.value || '115200';
+        
+    //     if (!port || port === 'No Port Found' || port === 'Error loading ports') {
+    //         alert('Silahkan pilih port terlebih dahulu!'); return;
+    //     }
+
+    //     try {
+    //         const resp = await fetch(this.baseUrl + '/connect', {
+    //             method: 'POST',
+    //             headers: { 'Content-Type': 'application/json' },
+    //             body: JSON.stringify({ type: 'serial', port: port, baud: parseInt(baud, 10) })
+    //         });
+    //         const data = await resp.json();
+            
+    //         if (data.status === 'success' || resp.ok) {
+    //             this.currentConnectionName = data.connection_name;
+    //             this.isConnected = true;
+    //             this.updateUI(true);
+    //             this.startWebSocket(); // Jalankan WebSocket
+    //             if (this.onConnect) this.onConnect();
+    //         } else {
+    //             this.updateUI(false, true);
+    //             alert('Koneksi SERIAL gagal: ' + (data.message || 'Error tidak diketahui'));
+    //         }
+    //     } catch (err) {
+    //         this.updateUI(false, true);
+    //     }
+    // }
+
     async connectSerial() {
         this.remoteBackendMode = false;
-        const port = document.getElementById('portSelect')?.value;
+        const portValue = document.getElementById('portSelect')?.value;
         const baud = document.getElementById('baudSelect')?.value || '115200';
         
-        if (!port || port === 'No Port Found' || port === 'Error loading ports') {
-            alert('Silahkan pilih port terlebih dahulu!'); return;
-        }
+        // Pastikan user sudah men-scan port laptop
+        if (portValue === 'webserial') {
+            if (!this.localSerialPort) {
+                alert('Silakan tekan Scan dan pilih port terlebih dahulu!');
+                return;
+            }
 
-        try {
-            const resp = await fetch(this.baseUrl + '/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'serial', port: port, baud: parseInt(baud, 10) })
-            });
-            const data = await resp.json();
-            
-            if (data.status === 'success' || resp.ok) {
-                this.currentConnectionName = data.connection_name;
+            try {
+                // 1. Buka port antena radio yang menancap di laptop
+                await this.localSerialPort.open({ baudRate: parseInt(baud, 10) });
+                this.currentConnectionName = "WebSerial_Bridge";
                 this.isConnected = true;
                 this.updateUI(true);
-                this.startWebSocket(); // Jalankan WebSocket
+
+                // 2. Beritahu Python (RasPi) agar bersiap menerima data lemparan (Mode UDP lokal)
+                await fetch(this.baseUrl + '/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'ip', host: '127.0.0.1', port: 14550 })
+                });
+
+                // 3. Hidupkan WebSocket untuk jembatan data UI
+                this.startWebSocket(); 
+                
+                // Siapkan Reader dan Writer dari port laptop
+                this.serialReader = this.localSerialPort.readable.getReader();
+                this.serialWriter = this.localSerialPort.writable.getWriter();
+
+                // 4. JEMBATAN NAIK: Loop membaca dari Radio Laptop -> Lempar ke RasPi via WebSocket
+                this.readLoop();
+
+                // 5. JEMBATAN TURUN: Menangkap data dari RasPi -> Tulis ke Radio Laptop
+                this.ws.on('raw_serial_down', (data) => {
+                    if (this.serialWriter) {
+                        this.serialWriter.write(new Uint8Array(data));
+                    }
+                });
+
                 if (this.onConnect) this.onConnect();
-            } else {
+
+            } catch (err) {
                 this.updateUI(false, true);
-                alert('Koneksi SERIAL gagal: ' + (data.message || 'Error tidak diketahui'));
+                alert('Gagal membuka port radio laptop: ' + err.message);
+            }
+        } else {
+            alert('Silahkan klik tombol Scan terlebih dahulu untuk mencari port laptop!');
+        }
+    }
+
+    // Fungsi loop latar belakang untuk terus membaca data radio
+    async readLoop() {
+        try {
+            while (true) {
+                const { value, done } = await this.serialReader.read();
+                if (done) {
+                    this.serialReader.releaseLock();
+                    break;
+                }
+                if (this.ws && this.ws.connected) {
+                    this.ws.emit('raw_serial_up', value);
+                }
             }
         } catch (err) {
-            this.updateUI(false, true);
+            console.error("Terjadi putus koneksi pada serial baca:", err);
         }
     }
 
@@ -319,6 +418,24 @@ class GCSApiClient {
         try {
             this.stopWebSocket(); // Hentikan WebSocket
             
+            // if (!this.remoteBackendMode) {
+            //     try { await fetch(this.baseUrl + '/disconnect', { method: 'POST' }); } catch (e) {}
+            // }
+
+            if (this.serialReader) {
+                try { await this.serialReader.cancel(); } catch(e){}
+                this.serialReader = null;
+            }
+            if (this.serialWriter) {
+                try { this.serialWriter.releaseLock(); } catch(e){}
+                this.serialWriter = null;
+            }
+            if (this.localSerialPort) {
+                try { await this.localSerialPort.close(); } catch(e){}
+                this.localSerialPort = null;
+            }
+            // --- AKHIR PENAMBAHAN ---
+
             if (!this.remoteBackendMode) {
                 try { await fetch(this.baseUrl + '/disconnect', { method: 'POST' }); } catch (e) {}
             }
