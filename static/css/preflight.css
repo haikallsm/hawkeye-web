@@ -1,0 +1,496 @@
+.main {
+    margin-top: 60px;
+    padding: 20px;
+    max-width: 1400px;
+    margin-left: auto;
+    margin-right: auto;
+    position: relative;
+    z-index: 1;
+}
+
+.health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.health-card {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 15px;
+    transition: border-color 0.3s;
+}
+
+.health-card:hover {
+    border-color: #00bcd4;
+}
+
+.health-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.health-title {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.health-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #00e5ff;
+}
+
+.health-detail {
+    font-size: 11px;
+    color: #888;
+    margin-top: 5px;
+}
+
+.calibration-container {
+    display: grid;
+    grid-template-columns: 3fr 1.2fr;
+    gap: 50px;
+    margin-top: 25px;
+    align-items: start;
+}
+
+.calibration-section-left{
+    width: 100%;
+    padding: 20px;
+}
+.calibration-section-right {
+    width: 100%;
+    max-width: 420px;
+    justify-self: end;
+    padding: 20px;
+}
+
+@media (max-width: 900px) {
+    .calibration-container {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .calibration-section-left,
+    .calibration-section-right {
+        width: 100%;
+    }
+}
+
+.calibration-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    transition: background 0.2s;
+    cursor: pointer;
+}
+
+.calibration-item:hover {
+    background: #252525;
+}
+
+.calibration-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #00bcd4;
+    cursor: pointer;
+}
+
+.calibration-item label {
+    flex: 1;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.calibration-item.checked label {
+    text-decoration: line-through;
+    color: #666;
+}
+
+.action-bar {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.btn-arm {
+    background: #4caf50;
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: 0.2s;
+}
+
+.btn-arm:hover {
+    background: #45a049;
+}
+
+.btn-disarm {
+    background: #f44336;
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: 0.2s;
+}
+
+.btn-disarm:hover {
+    background: #da190b;
+}
+
+.status-badge {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-badge.armed {
+    background: #4caf50;
+    color: white;
+}
+
+.status-badge.disarmed {
+    background: #f44336;
+    color: white;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s infinite;
+}
+
+.status-dot.ok {
+    background: #4caf50;
+}
+
+.status-dot.warning {
+    background: #ff9800;
+}
+
+.status-dot.error {
+    background: #f44336;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.health-value.critical {
+    color: #f44336;
+}
+
+.health-value.warning {
+    color: #ff9800;
+}
+
+.calibration-item.auto-check {
+    background: #1a2a2a;
+}
+
+.calibration-item.auto-check input[type="checkbox"]:checked {
+    accent-color: #4caf50;
+}
+
+.calibration-item.auto-check.failed {
+    background: #2a1a1a;
+}
+
+.calibration-item.auto-check.failed input[type="checkbox"] {
+    accent-color: #f44336;
+}
+
+.data-source {
+    font-size: 10px;
+    color: #666;
+    margin-top: 2px;
+}
+
+.refresh-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: #4caf50;
+    border-radius: 50%;
+    margin-left: 5px;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.calibration-title {
+    color: #00bcd4;
+    font-weight: bold;
+    font-size: 16px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+}
+
+.calib-group h4 {
+    color: #fff;
+    margin: 15px 0 10px 0;
+    font-size: 14px;
+}
+
+.calib-item {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px dashed #2a2a2a;
+}
+.calib-item:last-child { border-bottom: none; }
+
+.calib-item p {
+    font-size: 12px;
+    color: #aaa;
+    margin: 0 0 10px 0;
+    line-height: 1.5;
+}
+
+.btn-mp {
+    background: #4caf50; /* Warna Hijau khas Mission Planner */
+    color: white;
+    border: 1px solid #388e3c;
+    padding: 6px 15px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 3px;
+}
+.btn-mp:hover { background: #66bb6a; }
+
+.btn-mp-cancel {
+    background: #555;
+    border-color: #444;
+}
+.btn-mp-cancel:hover { background: #666; }
+
+.calib-split-layout {
+    display: flex;
+    gap: 25px;
+    margin-top: 10px;
+}
+
+.calib-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.calib-btn-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.mag-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mag-row span {
+    width: 45px;
+    font-size: 12px;
+    color: #ccc;
+}
+
+.mag-input {
+    flex: 1;
+    background: #222;
+    border: 1px solid #444;
+    padding: 6px;
+    color: #00bcd4;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 3px;
+}
+
+.console-box {
+    background: #000;
+    border: 1px solid #444;
+    height: 120px;
+    overflow-y: auto;
+    padding: 10px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 10px;
+    color: #00e676;
+    border-radius: 3px;
+}
+
+.btn-reboot-fc {
+    background: #e53935;
+    color: white;
+    border: 1px solid #c62828;
+    width: 100%;
+    padding: 10px 15px;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 4px;
+    margin-top: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-reboot-fc:hover {
+    background: #ef5350;
+    box-shadow: 0 4px 10px rgba(229, 57, 53, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-reboot-fc:active {
+    transform: translateY(1px);
+    background: #c62828;
+}
+
+.arm-control-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.arm-control-bar .btn-disarm,
+.arm-control-bar .btn-arm {
+    flex: 1;
+    padding: 10px 16px;
+    font-size: 13px;
+    text-align: center;
+}
+
+.arm-control-bar .status-badge {
+    flex-shrink: 0;
+    min-width: 80px;
+    text-align: center;
+}
+
+.arm-control-bar button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(40%);
+}
+
+/* === ACTION ROW (baris perintah) === */
+.action-row {
+    display: grid;
+    grid-template-columns: 1fr 90px;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: center;
+}
+
+.action-select {
+    width: 100%;
+    padding: 8px 12px;
+    background: #1a1a1a;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.action-select:focus {
+    outline: none;
+    border-color: #00bcd4;
+}
+
+.btn-action {
+    width: 100%;
+    padding: 8px;
+    background: #00bcd4;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.btn-action:hover {
+    background: #00e5ff;
+    box-shadow: 0 0 8px rgba(0, 188, 212, 0.4);
+}
+
+.arm-status-row {
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.arm-status-row .status-badge {
+    display: inline-block;
+    padding: 8px 20px;
+    font-size: 16px;
+    border-radius: 6px;
+}
+
+/* === TRANSFORM BUTTON & STATUS === */
+.transform-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+.btn-transform {
+    background: #ff9800;
+    color: #000;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.btn-transform:hover {
+    background: #ffb74d;
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.4);
+}
+.btn-transform:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.transform-status {
+    font-size: 14px;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-right: 15px;
+    color: #4caf50; /* default hijau untuk Quad */
+}
+.arm-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start; /* rata kiri */
+    gap: 15px;
+    margin-bottom: 15px;
+}

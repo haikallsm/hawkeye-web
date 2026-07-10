@@ -1,0 +1,36 @@
+.setup-container { max-width: 900px; margin: 80px auto 20px; padding: 0 20px; margin-bottom: 50px; }
+.setup-card { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 30px; margin-bottom: 20px; transition: all 0.3s; }
+.setup-card:hover { border-color: #00bcd4; box-shadow: 0 0 20px rgba(0, 188, 212, 0.1); }
+.setup-title { font-size: 24px; color: #00bcd4; margin-bottom: 30px; font-weight: bold; }
+
+/* Class baru pindahan dari inline style */
+.ip-section { margin-bottom: 20px; }
+
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; margin-bottom: 8px; color: #00bcd4; font-weight: 600; font-size: 13px; text-transform: uppercase; }
+.form-group input { width: 100%; background: #252525; color: #ccc; border: 1px solid #444; padding: 12px; border-radius: 6px; font-size: 14px; outline: none; }
+.form-group input:focus { border-color: #00bcd4; box-shadow: 0 0 10px rgba(0, 188, 212, 0.2); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+
+.button-group { display: flex; gap: 10px; margin-top: 30px; }
+.btn { flex: 1; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; text-transform: uppercase; }
+.btn-primary { background: #00bcd4; color: black; }
+.btn-primary:hover { background: #00acc1; }
+.btn-primary:disabled { background: #666; cursor: not-allowed; }
+.btn-secondary { background: #444; color: #ccc; }
+.btn-secondary:hover { background: #555; }
+
+.status-info { margin-top: 20px; padding: 15px; background: #0a0a0a; border-left: 4px solid #00bcd4; border-radius: 4px; display: none; }
+.status-info.show { display: block; }
+.status-info.success { border-left-color: #4caf50; background: #0a2d0a; color: #4caf50; }
+.status-info.error { border-left-color: #f44336; background: #2d0a0a; color: #f44336; }
+.status-info.info { border-left-color: #2196f3; background: #0a1a2d; color: #2196f3; }
+
+.test-section { margin-top: 20px; padding: 20px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; }
+.test-section h3 { color: #00bcd4; margin-top: 0; }
+.test-item { padding: 10px 0; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #333; }
+.test-item:last-child { border-bottom: none; }
+
+.status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; flex-shrink: 0; }
+.status-dot.ok { background: #4caf50; }
+.status-dot.error { background: #f44336; }

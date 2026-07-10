@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Planning - HAWKEYE</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+<link rel="stylesheet" href="/static/css/gcs.css"/>
+<link rel="stylesheet" href="/static/css/mission.css"/>
+</head>
+
+<body style="background: transparent;">
+
+<div class="main" style="margin-left: 0;"> <!-- Hilangkan margin kiri navbar -->
+    <div id="map"></div>
+    <div class="sidebar">
+        <div class="sidebar-header">Mission Planner</div>
+        <div class="command-bar">
+            <button onclick="setCommand('HOME')" id="btn-home">Home</button>
+            <button onclick="setCommand('TAKEOFF')" id="btn-takeoff">Takeoff</button>
+            <button onclick="setCommand('WAYPOINT')" id="btn-waypoint" class="active">Waypoint</button>
+            <button onclick="setCommand('LOITER')" id="btn-loiter">Loiter</button>
+            <button onclick="setCommand('RTL')" id="btn-rtl">RTL</button>
+            <button onclick="setCommand('LAND')" id="btn-land">Land</button>
+        </div>
+        <div class="stats-bar">
+            <div>Waypoints: <span id="wpCount">0</span></div>
+            <div>Distance: <span id="totalDist">0 m</span></div>
+        </div>
+        <div style="padding: 10px 15px; border-bottom: 1px solid #333; font-size: 12px; color: #aaa;">
+            <div>FC Status: <span id="missionStatus" style="color: #00bcd4;">Connected</span></div>
+        </div>
+        <div class="waypoint-list" id="waypointList">
+            <div class="empty-state">Click on the map to add waypoints.<br>Current command: Waypoint</div>
+        </div>
+        <div class="sidebar-footer">
+            <button onclick="clearMission()">Clear</button>
+            <button onclick="readMissionFromFC()" title="Read mission from FC">Read</button>
+            <button onclick="saveMission()">Save</button>
+            <button class="primary" onclick="uploadMissionToFC()">Upload to FC</button>
+        </div>
+    </div>
+</div>
+
+<!-- ALTITUDE EDIT MODAL -->
+<div id="altitudeModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">Edit Waypoint Altitude</div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Waypoint Number: <span id="waypointNum" style="color: #00bcd4;">1</span></label>
+            </div>
+            <div class="form-group">
+                <label for="altitudeInput">Altitude (meters)</label>
+                <input type="number" id="altitudeInput" min="0" max="1000" step="1" placeholder="Enter altitude in meters">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary" onclick="closeEditAltitude()">Cancel</button>
+            <button class="primary" onclick="saveAltitude()">Save Altitude</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+// ===== HELPER KONEKSI PARENT =====
+const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
+const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+
+// ===== INISIALISASI PETA =====
+let map = L.map('map').setView([-7.25, 112.75], 13);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri',
+    maxZoom: 19
+}).addTo(map);
+
+setTimeout(() => map.invalidateSize(), 200);
+window.addEventListener('resize', () => {if (map) map.invalidateSize();});
+
+let waypoints = [];
+let markers = [];
+let polyline = null;
+let currentCommand = 'WAYPOINT';
+
+function reindexWaypoints() { waypoints.forEach((wp, i) => { wp.id = i; }); }
+
+function setCommand(cmd) {
+    currentCommand = cmd;
+    document.querySelectorAll('.command-bar button').forEach(btn => btn.classList.remove('active'));
+    const activeBtn = document.getElementById('btn-' + cmd.toLowerCase());
+    if (activeBtn) activeBtn.classList.add('active');
+}
+
+function addWaypoint(lat, lon) {
+    const wp = {
+        id: waypoints.length, command: currentCommand, lat: lat, lon: lon,
+        alt: currentCommand === 'HOME' ? 0 : (currentCommand === 'TAKEOFF' ? 20 : 30),
+        p1: 0, p2: 0, p3: currentCommand === 'LOITER' ? 15 : 0, p4: 0
+    };
+
+    if (currentCommand === 'HOME') {
+        waypoints = waypoints.filter(item => item.command !== 'HOME');
+        waypoints.unshift(wp);
+    } else {
+        waypoints.push(wp);
+    }
+    
+    reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+}
+
+function updateParam(index, field, value) {
+    const val = parseFloat(value);
+    if (!isNaN(val)) { waypoints[index][field] = val; updateMapPath(); }
+    saveWaypointsLocal();
+}
+
+function distanceMeters(lat1Deg, lon1Deg, lat2Deg, lon2Deg) {
+    const R = 6371000;
+    const lat1 = lat1Deg * Math.PI / 180, lon1 = lon1Deg * Math.PI / 180;
+    const lat2 = lat2Deg * Math.PI / 180, lon2 = lon2Deg * Math.PI / 180;
+    const dLat = lat2 - lat1, dLon = lon2 - lon1;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function isValidCoordinate(lat, lon) {
+    const l1 = parseFloat(lat), l2 = parseFloat(lon);
+    if (isNaN(l1) || isNaN(l2)) return false;
+    return (Math.abs(l1) > 0.0001 || Math.abs(l2) > 0.0001);
+}
+
+function calculateSmoothTrajectory(wp1, wp2, stepMeters = 15) {
+    const totalDistance = distanceMeters(wp1.lat, wp1.lon, wp2.lat, wp2.lon);
+    const points = [];
+    if (totalDistance <= stepMeters) { points.push([wp2.lat, wp2.lon]); return points; }
+    const numSteps = Math.floor(totalDistance / stepMeters);
+    for (let i = 0; i <= numSteps; i++) {
+        const fraction = i / numSteps;
+        points.push([wp1.lat + (wp2.lat - wp1.lat) * fraction, wp1.lon + (wp2.lon - wp1.lon) * fraction]);
+    }
+    return points;
+}
+
+function updateMapPath() {
+    markers.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+    markers = [];
+    if (polyline && map.hasLayer(polyline)) map.removeLayer(polyline);
+
+    let fullTrajectory = [];
+    for (let i = 0; i < waypoints.length; i++) {
+        if (i > 0) fullTrajectory = fullTrajectory.concat(calculateSmoothTrajectory(waypoints[i-1], waypoints[i]));
+        else fullTrajectory.push([waypoints[i].lat, waypoints[i].lon]);
+        
+        const wp = waypoints[i];
+        const color = wp.command === 'HOME' ? '#ffeb3b' : (i === 0 ? '#4caf50' : '#00bcd4');
+        
+        const marker = L.circleMarker([wp.lat, wp.lon], { radius: 7, fillColor: color, color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
+        marker.bindTooltip(`<b>${wp.command === 'HOME' ? 'H' : i}</b>`, { permanent: true, direction: 'center', className: 'wp-text-label' });
+        markers.push(marker);
+    }
+
+    if (fullTrajectory.length > 1) {
+        polyline = L.polyline(fullTrajectory, { color: '#00bcd4', weight: 3, dashArray: '6, 6' }).addTo(map);
+    }
+}
+
+function renderWaypoints() {
+    const list = document.getElementById('waypointList');
+    if (!list) return;
+
+    if (waypoints.length === 0) { 
+        list.innerHTML = `<div class="empty-state">Klik pada peta untuk menambahkan waypoint</div>`;
+        updateStats(); return; 
+    }
+    
+    let html = '';
+    waypoints.forEach((wp, i) => {
+        let paramInputHtml = '';
+        if (wp.command === 'WAYPOINT') {
+            paramInputHtml = `<div class="wp-param-row"><label>Hold (s):</label><input type="number" class="wp-grid-input" value="${wp.p1 || 0}" onchange="updateParam(${i}, 'p1', this.value)"></div>`;
+        } else if (wp.command === 'LOITER') {
+            paramInputHtml = `<div class="wp-param-row"><label>Radius (m):</label><input type="number" class="wp-grid-input" value="${wp.p3 || 0}" onchange="updateParam(${i}, 'p3', this.value)"></div>`;
+        }
+        html += `
+        <div class="waypoint-item">
+            <div class="waypoint-index">${wp.command === 'HOME' ? 'H' : i}</div>
+            <div class="waypoint-info">
+                <div class="waypoint-command">${wp.command}</div>
+                <div class="wp-param-row"><label>Alt (m):</label><input type="number" class="wp-grid-input" value="${wp.alt}" onchange="updateParam(${i}, 'alt', this.value)"></div>
+                ${paramInputHtml}
+            </div>
+            <div class="waypoint-actions">
+                <button onclick="moveUp(${i})">▲</button>
+                <button onclick="moveDown(${i})">▼</button>
+                <button onclick="removeWaypoint(${i})" style="background:#f44336; color:white; border-color:#d32f2f;">✕</button>
+            </div>
+        </div>`;
+    });
+    list.innerHTML = html;
+    updateStats();
+}
+
+function moveUp(index) {
+    if (index <= 0 || waypoints[index].command === 'HOME' || (index === 1 && waypoints[0].command === 'HOME')) return;
+    const temp = waypoints[index];
+    waypoints[index] = waypoints[index - 1];
+    waypoints[index - 1] = temp;
+    reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+}
+
+function moveDown(index) {
+    if (index < 0 || index >= waypoints.length - 1 || waypoints[index].command === 'HOME') return;
+    const temp = waypoints[index];
+    waypoints[index] = waypoints[index + 1];
+    waypoints[index + 1] = temp;
+    reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+}
+
+function removeWaypoint(index) {
+    waypoints.splice(index, 1);
+    reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+}
+
+function updateStats() {
+    const countE1 = document.getElementById('wpCount');
+    const distE1 = document.getElementById('totalDist');
+    countE1.innerText = waypoints.filter(wp => wp.command !== 'HOME').length;
+
+    let dist = 0;
+    for (let i = 1; i < waypoints.length; i++) {
+        dist += distanceMeters(waypoints[i-1].lat, waypoints[i-1].lon, waypoints[i].lat, waypoints[i].lon);
+    }
+    distE1.innerText = dist > 1000 ? (dist/1000).toFixed(2) + ' km' : Math.round(dist) + ' m';
+}
+
+function clearMission() {
+    waypoints = [];
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    if (polyline) map.removeLayer(polyline);
+    polyline = null;
+    renderWaypoints(); updateStats(); saveWaypointsLocal();
+}
+
+function saveMission() {
+    const data = JSON.stringify(waypoints, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'mission.json'; a.click();
+}
+
+map.on('click', function(e) { addWaypoint(e.latlng.lat, e.latlng.lng); });
+
+map.on('contextmenu', function(e) {
+    const popupContent = `
+        <div style="text-align: center; padding: 5px;">
+            <b style="color: #000; font-size: 13px; display:block; margin-bottom:8px;">Opsi Peta</b>
+            <button onclick="setHomeHere(${e.latlng.lat}, ${e.latlng.lng})" 
+                    style="background: #00bcd4; color: black; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px;">
+                Set Home Here
+            </button>
+        </div>
+    `;
+    L.popup().setLatLng(e.latlng).setContent(popupContent).openOn(map);
+});
+
+function saveWaypointsLocal() { localStorage.setItem('hawkeye_mission', JSON.stringify(waypoints)); }
+
+function loadWaypointsLocal() {
+    const saved = localStorage.getItem('hawkeye_mission');
+    if(saved) {
+        try {
+            waypoints = JSON.parse(saved);
+            reindexWaypoints(); renderWaypoints(); updateMapPath(); updateStats();
+        } catch (e) {} 
+    } else {
+        renderWaypoints(); updateStats();
+    }
+}
+loadWaypointsLocal();
+
+// ===== ALTITUDE EDITING =====
+let editingWaypointIndex = -1;
+
+function openEditAltitude(index) {
+    editingWaypointIndex = index;
+    document.getElementById('waypointNum').innerText = index + 1;
+    document.getElementById('altitudeInput').value = waypoints[index].alt;
+    document.getElementById('altitudeModal').style.display = 'block';
+    setTimeout(() => document.getElementById('altitudeInput').focus(), 100);
+}
+
+function closeEditAltitude() {
+    document.getElementById('altitudeModal').style.display = 'none';
+    editingWaypointIndex = -1;
+}
+
+function saveAltitude() {
+    const newAlt = parseInt(document.getElementById('altitudeInput').value);
+    if (isNaN(newAlt) || newAlt < 0) return alert('Please enter a valid altitude value');
+    waypoints[editingWaypointIndex].alt = newAlt;
+    renderWaypoints(); updateMapPath(); updateStats(); closeEditAltitude();
+}
+
+window.onclick = function(event) {
+    const modal = document.getElementById('altitudeModal');
+    if (event.target == modal) closeEditAltitude();
+}
+
+// ===== DRONE TRACKING MENGGUNAKAN DATA PARENT =====
+let droneMarker = null;
+function trackDronePosition() {
+    setInterval(() => {
+        if (!isConnected()) return;
+        
+        // Ambil data dari objek telemetry milik Parent
+        const telemetry = window.parent.gcsConnection.telemetry ? window.parent.gcsConnection.telemetry.data : null;
+        if (!telemetry) return;
+
+        if (isValidCoordinate(telemetry.lat, telemetry.lon)) {
+            updateDroneMarker(telemetry.lat, telemetry.lon, telemetry.heading || 0);
+        }
+
+        if (telemetry.home_lat !== undefined && isValidCoordinate(telemetry.home_lat, telemetry.home_lon)) {
+            let homeIndex = waypoints.findIndex(wp => wp.command === 'HOME');
+            if (homeIndex === -1) {
+                waypoints.unshift({ id: 0, command: 'HOME', lat: telemetry.home_lat, lon: telemetry.home_lon, alt: telemetry.home_alt || 0 });
+                reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+            } else if (!isValidCoordinate(waypoints[homeIndex].lat, waypoints[homeIndex].lon)) {
+                waypoints[homeIndex].lat = telemetry.home_lat;
+                waypoints[homeIndex].lon = telemetry.home_lon;
+                waypoints[homeIndex].alt = telemetry.home_alt || 0;
+                renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+            }
+        }
+    }, 500);
+}
+
+function updateDroneMarker(lat, lon, heading) {
+    if (!droneMarker) {
+        const droneIcon = L.divIcon({
+            html: '<div class="drone-marker" style="transform: rotate(' + heading + 'deg);"></div>',
+            iconSize: [36, 36], iconAnchor: [18, 18], className: 'drone-icon'
+        });
+        droneMarker = L.marker([lat, lon], { icon: droneIcon, zIndexOffset: 500 })
+            .bindPopup('<b>Drone</b><br>Lat: ' + lat.toFixed(6) + '<br>Lon: ' + lon.toFixed(6) + '<br>Heading: ' + heading.toFixed(0) + '°')
+            .addTo(map);
+    } else {
+        droneMarker.setLatLng([lat, lon]);
+        const icon = droneMarker.getIcon();
+        icon.options.html = '<div class="drone-marker" style="transform: rotate(' + heading + 'deg);"></div>';
+        droneMarker.setIcon(icon);
+    }
+}
+
+// ===== API CALLS KE BACKEND =====
+async function uploadMissionToFC() {
+    if (waypoints.length === 0) return alert('No waypoints to upload. Add waypoints first.');
+    try {
+        const btn = document.querySelector('.sidebar-footer button.primary');
+        const originalText = btn.innerText;
+        btn.innerText = 'Uploading...'; btn.disabled = true;
+
+        const response = await fetch(getBaseUrl() + '/mission/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ waypoints: waypoints })
+        });
+        
+        const result = await response.json();
+        alert(result.status === 'success' ? 'Mission uploaded successfully!\n' + result.message : 'Upload failed: ' + result.message);
+        
+        btn.innerText = originalText; btn.disabled = false;
+    } catch (err) {
+        alert('Error uploading mission: ' + err.message);
+        const btn = document.querySelector('.sidebar-footer button.primary');
+        btn.innerText = 'Upload to FC'; btn.disabled = false;
+    }
+}
+
+async function readMissionFromFC() {
+    try {
+        const btn = document.querySelector('button[title="Read mission from FC"]');
+        const originalText = btn.innerText;
+        btn.innerText = 'Reading...'; btn.disabled = true;
+
+        const response = await fetch(getBaseUrl() + '/mission/read');
+        const result = await response.json();
+        const commandMap = { 16: 'WAYPOINT', 22: 'TAKEOFF', 21: 'LAND', 20: 'RTL', 17: 'LOITER' };
+        
+        if (result.status === 'success' && result.waypoints) {
+            const loadedWaypoints = result.waypoints.map((wp, idx) => {
+                return {
+                    id: idx, command: wp.command_name || commandMap[wp.command] || wp.command || 'WAYPOINT',
+                    lat: parseFloat(wp.lat), lon: parseFloat(wp.lon), alt: parseFloat(wp.alt) || 30
+                };
+            });
+            waypoints = [];
+            if (result.home) {
+                let hLat = parseFloat(result.home.lat), hLon = parseFloat(result.home.lon), hAlt = parseFloat(result.home.alt) || 0;
+                
+                // Intip dari telemetry parent jika terbaca 0,0
+                if (!isValidCoordinate(hLat, hLon) && window.parent.gcsConnection?.telemetry?.data) {
+                    const tel = window.parent.gcsConnection.telemetry.data;
+                    if (tel.home_lat !== undefined && isValidCoordinate(tel.home_lat, tel.home_lon)) {
+                        hLat = tel.home_lat; hLon = tel.home_lon; hAlt = tel.home_alt || 0;
+                    }
+                }
+                if (isValidCoordinate(hLat, hLon)){
+                    waypoints.push({ id: 0, command: 'HOME', lat: hLat, lon: hLon, alt: hAlt });
+                }
+            }
+            waypoints = waypoints.concat(loadedWaypoints);
+            waypoints.forEach((wp, idx) => wp.id = idx);
+            
+            renderWaypoints(); updateMapPath(); updateStats(); saveWaypointsLocal();
+            alert('Mission loaded from Flight Controller!\n' + result.waypoints.length + ' waypoints loaded');
+        } else {
+            alert('Failed to read mission: ' + result.message);
+        }
+
+        btn.innerText = originalText; btn.disabled = false;
+    } catch (err) {
+        alert('Error reading mission: ' + err.message);
+        const btn = document.querySelector('button[title="Read mission from FC"]');
+        btn.innerText = 'Read'; btn.disabled = false;
+    }
+}
+
+async function updateMissionStatus() {
+    if (!isConnected()) {
+        document.getElementById('missionStatus').innerText = 'Not connected';
+        return;
+    }
+    try {
+        // Ambil status dari API (sebelumnya sepertinya ini custom JS)
+        const response = await fetch(getBaseUrl() + '/mission/status');
+        const result = await response.json();
+        document.getElementById('missionStatus').innerText = result.status === 'success' ? result.total_missions + ' items' : 'Error';
+    } catch (err) {}
+}
+
+window.setHomeHere = async function(lat, lon) {
+    try{
+        const response = await fetch(getBaseUrl() + '/command/set_home', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ lat: lat, lon: lon, alt: 0 })
+        });
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            let homeIndex = waypoints.findIndex(wp => wp.command === 'HOME');
+            const newHomeItem = { id: 0, command: 'HOME', lat: lat, lon: lon, alt: 0, p1: 0, p2: 0, p3: 0, p4: 0 };
+            if (homeIndex !== -1) waypoints[homeIndex] = newHomeItem;
+            else waypoints.unshift(newHomeItem);
+
+            reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal(); map.closePopup();
+            alert('Home position set successfully!');
+        } else {
+            alert('Failed to set home: ' + result.message);
+        }
+    } catch (err) {
+        alert('Error setting home: ' + err.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    trackDronePosition();
+    setInterval(updateMissionStatus, 5000);
+    
+    const altInput = document.getElementById('altitudeInput');
+    if (altInput) {
+        altInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') saveAltitude();
+        });
+    }
+});
+</script>
+</body>
+</html>

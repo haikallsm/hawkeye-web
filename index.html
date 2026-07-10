@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAWKEYE GCS Master</title>
+    <!-- Masukkan CSS Navbar dan GCS di sini -->
+    <link rel="stylesheet" href="/static/css/navbar.css">
+    <link rel="stylesheet" href="/static/css/gcs.css">
+    <script src="/static/js/socket.io.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: #0a0a1a; }
+        iframe { border: none; width: 100%; height: 100%; flex-grow: 1; }
+    </style>
+</head>
+<body>
+    
+    <!-- Render Navbar di Master -->
+    <!-- {% include 'navbar.html' %} -->
+     <div id="navbar-placeholder"></div>
+
+    <!-- Iframe tempat halaman anak (flightview, mission, dll) diputar -->
+    <!-- Default URL arahkan ke route Flask untuk FlightView -->
+    <iframe id="main-frame" src="/flightview"></iframe>
+
+    <script src="/static/js/gcs.js"></script>
+    <script>
+        // HAPUS inisialisasi ulang window.gcsConnection dan initSocketIO di sini.
+        // gcs.js sudah mengurus semuanya dengan sempurna.
+        fetch('navbar.html')
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('navbar-placeholder').innerHTML = data;
+            })
+            .catch(error => console.error('Gagal memuat navbar:', error));
+
+        let iframeReady = false;          
+        const logQueue = [];              
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const frame = document.getElementById('main-frame');
+            if (frame) {
+                frame.addEventListener('load', function() {
+                    iframeReady = true;
+                    console.log('Iframe ready');
+                    
+                    // Kirim semua log yang tertunda setelah iframe siap
+                    while (logQueue.length > 0) {
+                        const queued = logQueue.shift();
+                        if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
+                            frame.contentWindow.updateMavlogUI(queued);
+                        }
+                    }
+                });
+            }
+
+            // Timpa fungsi onMavlog dari gcs.js untuk menambahkan fitur antrean (Queue)
+            window.gcsConnection.onMavlog = (logItem) => {
+                const frame = document.getElementById('main-frame');
+
+                // Jika iframe belum siap, simpan ke antrian
+                if (!iframeReady) {
+                    logQueue.push(logItem);
+                    return;
+                }
+
+                // Kirim log saat ini
+                if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
+                    frame.contentWindow.updateMavlogUI(logItem);
+                }
+            };
+        });
+
+        function navigateTo(url, el) {
+            document.getElementById('main-frame').src = url;
+            document.querySelectorAll('.nav-left a').forEach(a => a.classList.remove('active'));
+            if(el) el.classList.add('active');
+            const camBtn = document.getElementById('nav-camera');
+            if (url === '/flightview') {
+                camBtn.style.display = 'inline-block';
+            } else {
+                camBtn.style.display = 'none';
+            }
+        }
+
+        function triggerCamera() {
+            const frame = document.getElementById('main-frame');
+            if (frame.contentWindow && typeof frame.contentWindow.openVideo === 'function') {
+                frame.contentWindow.openVideo();
+            }
+        }
+
+        function toggleConnType() {
+            const type = document.getElementById('connTypeSelect').value;
+            document.getElementById('serialGroup').style.display = (type === 'serial') ? 'flex' : 'none';
+            document.getElementById('ipGroup').style.display = (type === 'ip') ? 'flex' : 'none';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preflight - HAWKEYE</title>
+<link rel="stylesheet" href="/static/css/gcs.css"/>
+<link rel="stylesheet" href="/static/css/preflight.css"/>
+</head>
+
+<body style="background: transparent;">
+
+<div class="main" style="margin-left: 0;"> <!-- Hilangkan margin kiri navbar -->
+    <div class="health-grid">
+        <div class="health-card">
+            <div class="health-header">
+                <div class="health-title">GPS</div>
+                <div class="status-dot ok" id="gpsStatus"></div>
+            </div>
+            <div class="health-value" id="gpsSats">0</div>
+            <div class="health-detail">Satellites &middot; HDOP: <span id="gpsHdop">--</span></div>
+        </div>
+
+        <div class="health-card">
+            <div class="health-header">
+                <div class="health-title">Compass</div>
+                <div class="status-dot ok" id="compassStatus"></div>
+            </div>
+            <div class="health-value" id="compassHealth">Wait</div>
+            <div class="health-detail">Interference: <span id="compassInterf">Low</span></div>
+        </div>
+
+        <div class="health-card">
+            <div class="health-header">
+                <div class="health-title">Accelerometer</div>
+                <div class="status-dot ok" id="accelStatus"></div>
+            </div>
+            <div class="health-value" id="accelHealth">0.0, 0.0, 0.0</div>
+            <div class="health-detail">Mag: 0.00 m/s²</div>
+        </div>
+
+        <div class="health-card">
+            <div class="health-header">
+                <div class="health-title">Gyroscope</div>
+                <div class="status-dot ok" id="gyroStatus"></div>
+            </div>
+            <div class="health-value" id="gyroHealth">0.0, 0.0, 0.0</div>
+            <div class="health-detail">deg/s (X, Y, Z)</div>
+        </div>
+    </div>
+    
+    <div class="calibration-container">
+        <div class="calibration-section-left">
+            <div class="calibration-title">Sensor Calibration</div>
+    
+            <div class="calib-group">
+                <h4>Accelerometer Calibration</h4>
+                
+                <div class="calib-item">
+                    <p>Level your Autopilot to set default accelerometer Min/Max (3 axis).<br>This will ask you to place your autopilot on each edge.</p>
+                    <button class="btn-mp" onclick="sendCalibration('accel_3axis')">Calibrate Accel</button>
+                    <button class="btn-mp" onclick="sendCalibrationNext()" id="btnAccelNext" style="display:none; background:#ff9800; border-color:#f57c00;">Next (Click when done)</button>
+                </div>
+                
+                <div class="calib-item">
+                    <p>Level your Autopilot to set default accelerometer offsets (1 axis/AHRS trims).<br>This requires you to place your autopilot flat and level.</p>
+                    <button class="btn-mp" onclick="sendCalibration('accel_level')">Calibrate Level</button>
+                </div>
+                
+                <div class="calib-item">
+                    <p>Level your Autopilot to set default accelerometer scale factors for level flight (1 axis).<br>This requires you to place your autopilot flat and level.</p>
+                    <button class="btn-mp" onclick="sendCalibration('accel_simple')">Simple Accel Cal</button>
+                </div>
+            </div>
+    
+            <div class="calib-group">
+                <h4>Onboard Mag Calibration</h4>
+                
+                <div class="calib-split-layout">
+                    <div class="calib-column">
+                        <div class="calib-btn-group">
+                            <button class="btn-mp" onclick="sendCompassCalibration('compass_start')">Start</button>
+                            <button class="btn-mp btn-mp-cancel" onclick="sendCompassCalibration('compass_accept')" id="btnCompassAccept" disabled>Accept</button>
+                            <button class="btn-mp btn-mp-cancel" onclick="sendCompassCalibration('compass_cancel')">Cancel</button>
+                        </div>
+    
+                        <div class="mag-row">
+                            <span>Mag 1</span>
+                            <input type="text" class="mag-input" id="mag1_prog" value="0%" readonly>
+                        </div>
+                        <div class="mag-row">
+                            <span>Mag 2</span>
+                            <input type="text" class="mag-input" id="mag2_prog" value="0%" readonly>
+                        </div>
+                        <div class="mag-row">
+                            <span>Mag 3</span>
+                            <input type="text" class="mag-input" id="mag3_prog" value="0%" readonly>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="calibration-section-right">
+            <div class="calib-column">
+                <div class="transform-row">
+                    <button class="btn-transform" onclick="toggleTransform()" id="transformBtn">Transform</button>
+                </div>
+                <div class="action-row">
+                    <select id="cmdSelect" class="action-select">
+                        <option value="arm">ARM</option>
+                        <option value="disarm">DISARM</option>
+                        <option value="safety_toggle">Toggle Safety</option>
+                        <option value="reboot">Reboot FC</option>
+                        <option value="takeoff">Takeoff</option>
+                        <option value="land">Land</option>
+                        <option value="rtl">RTL</option>
+                    </select>
+                    <button class="btn-action" onclick="executeCommand()">Action</button>
+                </div>
+
+                <!-- BARIS 2: Flight Mode (Stabilize, AltHold, Loiter, Guided, Auto) -->
+                <div class="action-row">
+                    <select id="modeSelect" class="action-select">
+                        <option value="stabilize">Stabilize</option>
+                        <option value="althold">Alt Hold</option>
+                        <option value="loiter">Loiter</option>
+                        <option value="guided">Guided</option>
+                        <option value="auto">Auto</option>
+                    </select>
+                    <button class="btn-action" onclick="executeMode()">Set Mode</button>
+                </div>
+
+                <!-- ARM/DISARM Status Badge -->
+                <div class="arm-status-row">
+                    <span class="transform-status" id="transformStatus">QUAD</span>
+                    <div class="status-badge disarmed" id="armStatusBadge">DISARMED</div>
+                </div>
+
+                <!-- Console Box -->
+                <div class="console-box" id="calibConsole">
+                    System ready. Connect to start calibration...<br>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let telemetryData = {};
+let lastCalibMsgTime = 0;
+let currentCalibPosition = '';
+let safetyIsOff = false; 
+
+// Fungsi pembantu untuk mengambil Base URL dari Parent Iframe
+const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
+const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+
+async function sendArmDisarm(cmd) {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    if (cmd === 'ARM' && !confirm('Yakin ingin ARM? Pastikan propeller sudah dilepas atau area sekitar aman.')) return;
+
+    logToConsole(`> Sending command: ${cmd}...`);
+    try {
+        const response = await fetch(getBaseUrl() + '/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: cmd })
+        });
+        const data = await response.json();
+        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+function updateArmStatusUI() {
+    const badge = document.getElementById('armStatusBadge');
+    const btnArm = document.getElementById('btnArm');
+    const btnDisarm = document.getElementById('btnDisarm');
+    if (!badge) return;
+
+    const isArmed = !!telemetryData.is_armed;
+    badge.innerText = isArmed ? 'ARMED' : 'DISARMED';
+    badge.className = 'status-badge ' + (isArmed ? 'armed' : 'disarmed');
+
+    if (btnArm) btnArm.disabled = isArmed;
+    if (btnDisarm) btnDisarm.disabled = !isArmed;
+}
+
+const MODE_MAP = {
+    'stabilize': 0,
+    'althold': 2,
+    'loiter': 5,
+    'guided': 4,
+    'auto': 3,
+    // tambahkan jika perlu
+};
+
+// ===== EKSEKUSI PERINTAH (baris 1) =====
+function executeCommand() {
+    const select = document.getElementById('cmdSelect');
+    const cmd = select.value;
+    switch(cmd) {
+        case 'arm': sendArmDisarm('ARM'); break;
+        case 'disarm': sendArmDisarm('DISARM'); break;
+        case 'safety_toggle': toggleSafetySwitch(); break;
+        case 'reboot': rebootFC(); break;
+        case 'takeoff': 
+            // Ketinggian tidak lagi diambil dari input, 
+            // tapi dikirim sebagai 0 (FC akan pakai default/mission)
+            sendTakeoff(0); 
+            break;
+        case 'land': sendLand(); break;
+        case 'rtl': sendRTL(); break;
+        default: logToConsole('Unknown command');
+    }
+}
+
+// ===== EKSEKUSI FLIGHT MODE (baris 2) =====
+function executeMode() {
+    const select = document.getElementById('modeSelect');
+    const mode = select.value;
+    const modeCode = MODE_MAP[mode];
+    if (modeCode === undefined) {
+        logToConsole(`Unknown mode: ${mode}`);
+        return;
+    }
+    switchFlightMode(mode, modeCode);
+}
+
+// ===== SWITCH FLIGHT MODE =====
+async function switchFlightMode(modeName, modeCode) {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    logToConsole(`> Switching flight mode to ${modeName.toUpperCase()} (${modeCode})...`);
+    try {
+        const response = await fetch(getBaseUrl() + '/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: `MODE:${modeCode}` })
+        });
+        const data = await response.json();
+        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+// ===== TAKEOFF & LAND =====
+async function sendTakeoff(alt) {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    if (!confirm('Execute Takeoff?')) return;
+    
+    logToConsole(`> Sending command: TAKEOFF...`);
+    try {
+        const response = await fetch(getBaseUrl() + '/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // alt 0 memberi tahu backend untuk menggunakan ketinggian default FC
+            body: JSON.stringify({ cmd: 'TAKEOFF', alt: alt }) 
+        });
+        const data = await response.json();
+        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+async function sendLand() {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    if (!confirm('Land drone?')) return;
+    logToConsole('> Sending command: LAND...');
+    try {
+        const response = await fetch(getBaseUrl() + '/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: 'LAND' })
+        });
+        const data = await response.json();
+        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+async function sendRTL() {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    if (!confirm('Return to Launch?')) return;
+    logToConsole('> Sending command: RTL...');
+    try {
+        const response = await fetch(getBaseUrl() + '/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cmd: 'RTL' })
+        });
+        const data = await response.json();
+        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+async function toggleSafetySwitch() {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+
+    const targetState = safetyIsOff ? 'on' : 'off';
+    logToConsole(`> Sending command: ${targetState.toUpperCase()}...`);
+
+    try {
+        const response = await fetch(getBaseUrl() + '/safety', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: targetState })
+        });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            logToConsole(`System: ${data.message}`);
+            safetyIsOff = !safetyIsOff;
+            const btn = document.getElementById('btnSafetyToggle');
+            if (btn) btn.innerText = safetyIsOff ? 'Safety: ON' : 'Safety: OFF';
+        } else {
+            logToConsole(`Error: ${data.message}`);
+        }
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+
+async function rebootFC() {
+    if (!confirm("Reboot?")) return;
+    logToConsole("> Mengirim perintah Reboot ke FC...");
+    try {
+        const response = await fetch(getBaseUrl() + '/command/reboot', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            logToConsole("System: Reboot");
+            const btnReboot = document.getElementById('btnRebootFC');
+            if (btnReboot) btnReboot.style.display = 'none';
+
+            setTimeout(async () => {
+                try {
+                    await fetch(getBaseUrl() + '/disconnect', { method: 'POST' });
+                    logToConsole("Port berhasil dilepas. Silakan tunggu bunyi beep selesai, lalu klik tombol Connect kembali.");
+                } catch (e) {}
+            }, 500);
+        } else {
+            logToConsole(`Error: ${data.message}`);
+        }
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+let currentTransformMode = 'QUAD';
+const TRANSFORM_CHANNEL = 5;
+const PWM_QUAD = 1500;
+const PWM_ROVER = 1900;
+
+function toggleTransform(){
+    if (!isConnected()) {
+        alert('Flight Controller is not connected.');
+    }
+    const newMode = currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD';
+    const pwm = newMode === 'ROVER' ? PWM_ROVER : PWM_QUAD;
+    const btn = document.getElementById('transformBtn');
+    btn.disabled = true;
+    btn.innerText = `Switching to ${newMode}...`;
+    logToConsole(`> Transform to ${newMode.toUpperCase()} (channel ${TRANSFORM_CHANNEL}, PWM ${pwm})...`);
+
+    fetch(getBaseUrl() + '/transform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode:'newMode.toLowerCase()', channel: TRANSFORM_CHANNEL, pwm: pwm })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.status === 'success') {
+            logToConsole(`System: ${data.message}`);
+            currentTransformMode = newMode;
+            const statusEl = document.getElementById('transformStatus');
+            statusEl.innerText = `Mode: ${newMode.toUpperCase()}`;
+            statusEl.style.color = newMode === 'ROVER' ? '#ff9800' : '#4caf50';
+            btn.innerText = `Transform to ${newMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
+        } else {
+            logToConsole(`Error: ${data.message}`);
+            btn.innerText = `Transform to ${currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
+        }
+        btn.disabled = false;
+        console.log('Sending payload:', { mode: newMode.toLowerCase(), channel: TRANSFORM_CHANNEL, pwm: pwm });
+    })
+    .catch(err => {
+        logToConsole(`Error: ${err.message}`);
+        btn.disabled = false;
+        btn.innerText = `Transform to ${currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
+    });
+}
+
+async function sendCalibration(cmdType) {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+
+    logToConsole(`> Sending command: ${cmdType}...`);
+    try {
+        const response = await fetch(getBaseUrl() + '/command/calibrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: cmdType })
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            logToConsole(`System: Accepted ${data.message}`);
+            if (cmdType === 'accel_3axis'){
+                logToConsole("> ")
+                currentCalibPosition = 'level';
+                const btnNext = document.getElementById('btnAccelNext');
+                if (btnNext) btnNext.style.display = 'inline-block';
+            }
+        } else {
+            logToConsole(`Error: ${data.message}`);
+        }
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+const COMPASS_ENDPOINT_MAP = {
+    'compass_start' : '/command/calibrate/compass/start',
+    'compass_accept': '/command/calibrate/compass/accept',
+    'compass_cancel': '/command/calibrate/compass/cancel',
+};
+
+let compassStatusPollTimer = null;
+
+async function sendCompassCalibration(cmdType) {
+    if(!isConnected()) { alert('Flight Controller is not connected.'); return; }
+
+    const url = COMPASS_ENDPOINT_MAP[cmdType];
+    if (!url) { logToConsole(`Error: unknown compass command '${cmdType}'`); return; }
+
+    logToConsole(`> Sending command: ${cmdType}...`);
+
+    try {
+        const response = await fetch(getBaseUrl() + url, {
+            method: 'POST',
+            headers: {'Content-type': 'application/json'},
+        });
+        const data = await response.json();
+        
+        if(data.status === 'success') {
+            logToConsole(`System: ${data.message}`);
+            if(cmdType === 'compass_start') {
+                logToConsole("> Putar drone ke segala arah (roll+pitch+yaw) hingga semua compass selesai...");
+                startCompassStatusPolling();
+            } else if (cmdType === 'compass_accept') {
+                logToConsole("✓ Compass calibration diterima FC. WAJIB REBOOT agar tersimpan permanen.");
+                stopCompassStatusPolling();
+                const btnReboot = document.getElementById('btnRebootFC');
+                if (btnReboot) {
+                    btnReboot.style.display = 'inline-block';
+                    btnReboot.style.animation = 'pulse 1s infinite';
+                }
+            } else if (cmdType === 'compass_cancel') {
+                stopCompassStatusPolling();
+                resetMagProgressUI();
+            }
+        } else {
+            logToConsole(`Error: ${data.message}`);
+        }
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+    }
+}
+
+function resetMagProgressUI() {
+    for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById(`mag${i}_prog`);
+        if (el) el.value = '0%';
+    }
+}
+
+function startCompassStatusPolling() {
+    stopCompassStatusPolling(); 
+    compassStatusPollTimer = setInterval(fetchCompassStatus, 1000);
+}
+
+function stopCompassStatusPolling() {
+    if (compassStatusPollTimer) {
+        clearInterval(compassStatusPollTimer);
+        compassStatusPollTimer = null;
+    }
+}
+
+let lastCompassReportKeys = new Set();
+
+async function fetchCompassStatus() {
+    try {
+        const response = await fetch(getBaseUrl() + '/command/calibrate/compass/status');
+        if (!response.ok) return;
+        const status = await response.json();
+
+        const progress = status.compass_progress || {};
+        Object.keys(progress).forEach((compassId) => {
+            const idx = parseInt(compassId, 10);
+            const inputEl = document.getElementById(`mag${idx + 1}_prog`);
+            if (inputEl && !inputEl.value.includes('SUCCESS') && inputEl.value !== '100%' && inputEl.value !== 'FAILED') {
+                inputEl.value = `${progress[compassId]}%`;
+            }
+        });
+
+        const reports = status.compass_reports || {};
+        Object.keys(reports).forEach((compassId) => {
+            const idx = parseInt(compassId, 10);
+            const inputEl = document.getElementById(`mag${idx + 1}_prog`);
+            const reportKey = `${compassId}:${reports[compassId].status}`;
+
+            if (inputEl) {
+                inputEl.value = reports[compassId].status === 'SUCCESS' ? '100%' : 'FAILED';
+            }
+
+            if (!lastCompassReportKeys.has(reportKey)) {
+                lastCompassReportKeys.add(reportKey);
+                const fit = reports[compassId].fitness;
+                logToConsole(
+                    reports[compassId].status === 'SUCCESS'
+                        ? `✓ Compass ${compassId} SUKSES (fitness: ${fit})`
+                        : `✗ Compass ${compassId} GAGAL (fitness: ${fit})`
+                );
+            }
+        });
+
+        const btnAccept = document.getElementById('btnCompassAccept');
+        if (btnAccept) btnAccept.disabled = (status.success_mask === 0);
+
+        if (status.timeout_ok === false) {
+            logToConsole("Error: Compass calibration timeout. Klik Start untuk ulang.");
+            stopCompassStatusPolling();
+        }
+
+        if (status.state === 'IDLE' || status.state === 'SUCCESS') stopCompassStatusPolling();
+
+    } catch (err) {}
+}
+
+async function sendCalibrationNext() {
+    const btnNext = document.getElementById('btnAccelNext');
+    if (btnNext) btnNext.style.display = 'none'; 
+
+    const pos = currentCalibPosition || 'step';
+    logToConsole(`> Mengirim konfirmasi (ACK) untuk: ${pos.toUpperCase()}...`);
+
+    try {
+        const response = await fetch(getBaseUrl() + '/command/calibrate/next', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position: pos })
+        });
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            logToConsole(`> System: ${data.message}`);
+        } else {
+            logToConsole(`Error: FC menolak konfirmasi. (${data.message})`);
+            if (btnNext) btnNext.style.display = 'inline-block'; 
+        }
+    } catch (err) {
+        logToConsole(`Error jaringan: ${err.message}`);
+        if (btnNext) btnNext.style.display = 'inline-block';
+    }
+}
+
+function logToConsole(text) {
+    const consoleBox = document.getElementById('calibConsole');
+    if (!consoleBox) return;
+    const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
+    consoleBox.innerHTML += `[${timeStr}] ${text}<br>`;
+    consoleBox.scrollTop = consoleBox.scrollHeight;
+}
+
+// ===== PENGGANTI POLLING (DIDORONG OLEH MASTER IFRAME) =====
+window.updateTelemetryUI = function(data) {
+    telemetryData = data;
+    updateHealthCards();
+};
+
+function updateHealthCards() {
+    updateArmStatusUI();
+
+    const gpsFix = telemetryData.gps_fix_type || 0;
+    const satellites = telemetryData.satellites_visible || 0;
+    const hdop = telemetryData.hdop || 99.9;
+    
+    const gpsStatus = document.getElementById('gpsStatus');
+    if (satellites >= 8 && gpsFix >= 2) gpsStatus.className = 'status-dot ok';
+    else if (satellites >= 4) gpsStatus.className = 'status-dot warning';
+    else gpsStatus.className = 'status-dot error';
+    
+    document.getElementById('gpsSats').innerText = satellites;
+    document.getElementById('gpsHdop').innerText = hdop !== 99.9 ? hdop.toFixed(2) : '--';
+    
+    const accX = telemetryData.accel_x || 0;
+    const accY = telemetryData.accel_y || 0;
+    const accZ = telemetryData.accel_z || 0;
+    const accMag = telemetryData.accel_mag || 0;
+
+    const accelStatus = document.getElementById('accelStatus');
+    if (accMag > 8.5 && accMag < 11.0) accelStatus.className = 'status-dot ok';
+    else if (accMag === 0) accelStatus.className = 'status-dot error';
+    else accelStatus.className = 'status-dot warning'; 
+
+    document.getElementById('accelHealth').innerText = `${accX.toFixed(1)}, ${accY.toFixed(1)}, ${accZ.toFixed(1)}`;
+    document.querySelector('#accelHealth + .health-detail').innerText = `Mag: ${accMag.toFixed(2)} m/s²`;
+
+    const gyroX = telemetryData.gyro_x || 0;
+    const gyroY = telemetryData.gyro_y || 0;
+    const gyroZ = telemetryData.gyro_z || 0;
+    
+    const gyroStatus = document.getElementById('gyroStatus');
+    gyroStatus.className = telemetryData.gyro_x !== undefined ? 'status-dot ok' : 'status-dot error';
+    
+    document.getElementById('gyroHealth').innerText = `${gyroX.toFixed(1)}, ${gyroY.toFixed(1)}, ${gyroZ.toFixed(1)}`;
+    document.querySelector('#gyroHealth + .health-detail').innerText = `deg/s (X, Y, Z)`;
+
+    const magField = telemetryData.mag_field || 0;
+    const magVar = telemetryData.ekf_compass_var || 0; 
+    
+    const compassStatus = document.getElementById('compassStatus');
+    compassStatus.className = magField > 0 ? 'status-dot ok' : 'status-dot error';
+    
+    document.getElementById('compassHealth').innerText = magField > 0 ? magField.toFixed(2) + ' G' : 'Wait';
+    document.getElementById('compassInterf').innerText = magVar > 0 ? `Var: ${magVar.toFixed(3)}` : 'Low';
+
+    const systemStatus = telemetryData.system_status || 'UNKNOWN';
+    const allOk = systemStatus === 'OK' || systemStatus === 'STANDBY';
+    
+    ['compass', 'accel', 'gyro'].forEach(sensor => {
+        const statusDot = document.getElementById(sensor + 'Status');
+        if (statusDot) {
+            if (allOk) {
+                statusDot.className = 'status-dot ok';
+            } else if (statusDot.className !== 'status-dot warning') {
+                statusDot.className = 'status-dot error';
+            }
+        }
+    });
+
+    if (telemetryData.status === 'disconnected' || telemetryData.system_status === 'disconnected') {
+        document.getElementById('gpsStatus').className = 'status-dot error';
+        document.getElementById('gpsSats').innerText = '0';
+        document.getElementById('compassHealth').innerText = 'Disconnected';
+        return; 
+    }
+}
+
+window.updateMavlogUI = function(logItem) {
+    const safeText = String(logItem.text).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // Tampilkan di konsol
+    logToConsole(safeText);
+    
+    // Teruskan ke parser kalibrasi untuk trigger posisi selanjutnya
+    if (typeof processCalibrationMessages === 'function') {
+        processCalibrationMessages(safeText);
+    }
+};
+
+function processCalibrationMessages(msgText) {
+    const text = msgText.toLowerCase();
+
+    if (text.includes("place vehicle")) {
+        if (text.includes("level")) currentCalibPosition = "level";
+        else if (text.includes("right")) currentCalibPosition = "right";
+        else if (text.includes("left")) currentCalibPosition = "left";
+        else if (text.includes("down")) currentCalibPosition = "nosedown";
+        else if (text.includes("up")) currentCalibPosition = "noseup";
+        else if (text.includes("back")) currentCalibPosition = "back";
+
+        const btnNext = document.getElementById('btnAccelNext');
+        if (btnNext) btnNext.style.display = 'inline-block';
+        
+    } else if (text.includes("calibration successful") || text.includes("calibration failed")) {
+        const btnNext = document.getElementById('btnAccelNext');
+        if (btnNext) btnNext.style.display = 'none';
+        currentCalibPosition = ''; 
+    }
+}
+</script>
+</body>
+</html>

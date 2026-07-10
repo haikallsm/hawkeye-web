@@ -1,0 +1,40 @@
+<div class="navbar">
+    <div class="nav-left">
+        <h2>HAWKEYE</h2>
+        <a href="#" class="active" onclick="navigateTo('/flightview', this); return false;">Flight View</a>
+        <a href="#" onclick="navigateTo('/preflight', this); return false;">Preflight</a>
+        <a href="#" onclick="navigateTo('/mission', this); return false;">Mission</a>
+        <a href="#" onclick="navigateTo('/config', this); return false;">Config</a>
+        <a href="#" onclick="navigateTo('/setup', this); return false;">Setup</a>
+        
+        <!-- Tombol Kamera (Dikendalikan oleh index.html) -->
+        <a href="#" id="nav-camera" onclick="triggerCamera(); return false;">Camera</a>
+    </div>
+
+    <div class="nav-right nav-right-container">
+        <select id="connTypeSelect" onchange="toggleConnType()">
+            <option value="serial" selected>Serial / Radio</option>
+            <option value="ip">UDP / IP</option>
+        </select>
+        
+        <div id="serialGroup" class="input-group">
+            <select id="portSelect">
+                <option>Scanning ports...</option>
+            </select>
+            <select id="baudSelect">
+                <option value="115200" selected>115200 baud</option>
+                <option value="57600">57600 baud</option>
+            </select>
+            <button onclick="window.gcsConnection.loadPorts()">Scan</button>
+        </div>
+
+        <div id="ipGroup" class="input-group" style="display: none;">
+            <input type="text" id="ipHostInput" class="gcs-input" placeholder="IP Address" value="127.0.0.1" style="width: 110px;">
+            <input type="number" id="ipPortInput" class="gcs-input" placeholder="Port" value="14550" style="width: 65px;">
+        </div>
+        
+        <!-- Tombol Utama memanggil window.gcsConnection.connect() -->
+        <button id="connectBtn" onclick="window.gcsConnection.connect()">Connect</button>
+        <span id="statusText">Disconnected</span>
+    </div>
+</div>

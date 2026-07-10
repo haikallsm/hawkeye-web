@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Config - HAWKEYE</title>
+<link rel="stylesheet" href="/static/css/gcs.css"/>
+<link rel="stylesheet" href="/static/css/config.css"/>
+</head>
+
+<body style="background: transparent;">
+
+<div class="main" style="margin-left: 0;"> <!-- Hilangkan margin kiri navbar -->
+    <div class="page-title">Configuration &amp; Tuning</div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('pid')">PID Tuning</button>
+        <button class="tab-btn" onclick="switchTab('modes')">Flight Modes</button>
+        <button class="tab-btn" onclick="switchTab('params')">Parameters</button>
+    </div>
+
+    <!-- TAB PID (Konten sama persis dengan yang Anda miliki) -->
+    <div id="tab-pid" class="tab-panel active">
+        <div class="pid-grid">
+            <!-- Isi Kartu-Kartu PID Anda -->
+            <div class="pid-card">
+                <div class="pid-title">Rate Roll</div>
+                <div class="pid-row"><span class="pid-label">P</span><input type="number" id="rollP" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">I</span><input type="number" id="rollI" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">D</span><input type="number" id="rollD" class="pid-input" step="0.0001" placeholder="0.0000"></div>
+                <div class="pid-row"><span class="pid-label">IMAX</span><input type="number" id="rollIMax" class="pid-input" step="0.1" placeholder="0.0"></div>
+            </div>
+            
+            <div class="pid-card">
+                <div class="pid-title">Rate Pitch</div>
+                <div class="pid-row"><span class="pid-label">P</span><input type="number" id="pitchP" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">I</span><input type="number" id="pitchI" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">D</span><input type="number" id="pitchD" class="pid-input" step="0.0001" placeholder="0.0000"></div>
+                <div class="pid-row"><span class="pid-label">IMAX</span><input type="number" id="pitchIMax" class="pid-input" step="0.1" placeholder="0.0"></div>
+            </div>
+
+            <div class="pid-card">
+                <div class="pid-title">Rate Yaw</div>
+                <div class="pid-row"><span class="pid-label">P</span><input type="number" id="yawP" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">I</span><input type="number" id="yawI" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">D</span><input type="number" id="yawD" class="pid-input" step="0.0001" placeholder="0.0000"></div>
+                <div class="pid-row"><span class="pid-label">IMAX</span><input type="number" id="yawIMax" class="pid-input" step="0.1" placeholder="0.0"></div>
+            </div>
+
+            <div class="pid-card">
+                <div class="pid-title">Waypoint Nav</div>
+                <div class="pid-row"><span class="pid-label">Speed</span><input type="number" id="wpnavSpeed" class="pid-input" step="1" placeholder="0"></div>
+                <div class="pid-row"><span class="pid-label">Radius</span><input type="number" id="wpnavRadius" class="pid-input" step="1" placeholder="0"></div>
+                <div class="pid-row"><span class="pid-label">Accel</span><input type="number" id="wpnavAccel" class="pid-input" step="1" placeholder="0"></div>
+                <div class="pid-row"><span class="pid-label">Speed Up</span><input type="number" id="wpnavSpeedUp" class="pid-input" step="1" placeholder="0"></div>
+                <div class="pid-row"><span class="pid-label">Speed Dn</span><input type="number" id="wpnavSpeedDn" class="pid-input" step="1" placeholder="0"></div>
+            </div>
+
+            <div class="pid-card">
+                <div class="pid-title">Throttle Accel</div>
+                <div class="pid-row"><span class="pid-label">P</span><input type="number" id="thrAccelP" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">I</span><input type="number" id="thrAccelI" class="pid-input" step="0.001" placeholder="0.000"></div>
+                <div class="pid-row"><span class="pid-label">D</span><input type="number" id="thrAccelD" class="pid-input" step="0.0001" placeholder="0.0000"></div>
+                <div class="pid-row"><span class="pid-label">IMAX</span><input type="number" id="thrAccelIMax" class="pid-input" step="0.1" placeholder="0.0"></div>
+            </div>
+        </div>
+
+        <div class="param-actions">
+            <button class="btn btn-primary" onclick="savePID()">Write PID to Drone</button>
+            <button class="btn btn-secondary" onclick="refreshPIDUI()">Load from Parameters</button>
+            <button class="btn" style="background-color: #e53935; color: #fff; border: none; margin-left: auto;" onclick="resetPID()">Reset to Default</button>
+        </div>
+    </div>
+
+    <!-- FLIGHT MODES (Persis) -->
+    <div id="tab-modes" class="tab-panel">
+        <div class="flight-modes">
+            <!-- (Bagian Mode 1-6 Disederhanakan untuk contoh, paste utuh dari file asli Anda) -->
+            <div class="mode-item"><span class="mode-label">Mode 1</span><select class="mode-select" id="mode1"><option>STABILIZE</option><option selected>ALT_HOLD</option><option>LOITER</option><option>RTL</option><option>AUTO</option><option>LAND</option><option>GUIDED</option></select></div>
+            <div class="mode-item"><span class="mode-label">Mode 2</span><select class="mode-select" id="mode2"><option selected>STABILIZE</option><option>ALT_HOLD</option><option>LOITER</option><option>RTL</option><option>AUTO</option><option>LAND</option><option>GUIDED</option></select></div>
+            <div class="mode-item"><span class="mode-label">Mode 3</span><select class="mode-select" id="mode3"><option>STABILIZE</option><option>ALT_HOLD</option><option selected>LOITER</option><option>RTL</option><option>AUTO</option><option>LAND</option><option>GUIDED</option></select></div>
+            <div class="mode-item"><span class="mode-label">Mode 4</span><select class="mode-select" id="mode4"><option>STABILIZE</option><option>ALT_HOLD</option><option>LOITER</option><option selected>RTL</option><option>AUTO</option><option>LAND</option><option>GUIDED</option></select></div>
+            <div class="mode-item"><span class="mode-label">Mode 5</span><select class="mode-select" id="mode5"><option>STABILIZE</option><option>ALT_HOLD</option><option>LOITER</option><option>RTL</option><option selected>AUTO</option><option>LAND</option><option>GUIDED</option></select></div>
+            <div class="mode-item"><span class="mode-label">Mode 6</span><select class="mode-select" id="mode6"><option>STABILIZE</option><option>ALT_HOLD</option><option>LOITER</option><option>RTL</option><option>AUTO</option><option selected>LAND</option><option>GUIDED</option></select></div>
+        </div>
+        <div class="param-actions">
+            <button class="btn btn-primary" onclick="saveModes()">Save Flight Modes</button>
+        </div>
+    </div>
+
+    <!-- PARAMETERS (Persis) -->
+    <div id="tab-params" class="tab-panel">
+        <div class="search-bar">
+            <input type="text" id="paramSearch" placeholder="Search parameters..." onkeyup="filterParams()">
+            <button class="btn btn-secondary" onclick="loadParams()">&#128259; Refresh</button>
+        </div>
+        <div class="param-table-container">
+            <table class="data-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Description</th></tr>
+                </thead>
+                <tbody id="paramTable"></tbody>
+            </table>
+        </div>
+        <div class="param-actions">
+            <button class="btn btn-primary" onclick="saveParams()">Write to Drone</button>
+            <button class="btn btn-secondary" onclick="exportParams()">Save to File</button>
+            <input type="file" id="paramFileInput" accept=".csv,.param,.txt" style="display: none;" onchange="loadFromFile(event)">
+            <button class="btn btn-secondary" style="background-color: #ff9800; color: #fff; border: none;" onclick="document.getElementById('paramFileInput').click()">Load from File</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== HELPER KONEKSI PARENT =====
+const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
+const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+
+const COPTER_MODE_MAP = {
+    'STABILIZE': 0, 'ACRO': 1, 'ALT_HOLD': 2, 'AUTO': 3, 'GUIDED': 4,
+    'LOITER': 5, 'RTL': 6, 'CIRCLE': 7, 'LAND': 9, 'OF_LOITER': 10,
+    'DRIFT': 11, 'SPORT': 13, 'FLIP': 14, 'AUTOTUNE': 15, 'POSHOLD': 16,
+    'BRAKE': 17, 'THROW': 18, 'AVOID_ADSB': 19, 'GUIDED_NOGPS': 20,
+    'SMART_RTL': 21, 'FLOWHOLD': 22, 'FOLLOW': 23, 'ZIGZAG': 24,
+    'SYSTEMID': 25, 'AUTOROTATE': 26, 'AUTO_RTL': 27
+};
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+}
+
+async function RebootFC() {
+    if (confirm("Reboot Flight Controller now?")) {
+        try {
+            const res = await fetch(getBaseUrl() + '/command/reboot', {method: 'POST'});
+            const data = await res.json();
+            alert(data.status === 'success' ? "Flight Controller is rebooting..." : `Error: ${data.message}`);
+        } catch (e) {
+            alert(`Network error: ${e.message}`);
+        }
+    }
+}
+
+async function sendParamsToBackend(api_url, params, title, requireReboot = false) {
+    const btn = event.target;
+    const originalText = btn.innerText;
+    btn.innerText = "Writing & Verifying..."; btn.disabled = true;
+
+    try {
+        const res = await fetch(getBaseUrl() + api_url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({params: params})
+        });
+        
+        const textResp = await res.text();
+        let data;
+        try { data = JSON.parse(textResp); } catch (err) { throw new Error("Server gagal memproses data."); }
+        
+        if (data.status === 'success' || data.status === 'partial') {
+            if (data.status === 'partial') {
+                const fails = data.results.fail.map(f => `${f.name}: ${f.reason}`).join('\n');
+                alert(`Beberapa nilai gagal diverifikasi:\n${fails}`);
+            }
+            if (requireReboot) await RebootFC();
+            else forceDownloadParamsFromFC();
+        } else {
+            alert(`Error: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    } finally {
+        btn.innerText = originalText; btn.disabled = false;
+    }
+}
+
+const PID_MAP = {
+    'rollP': 'ATC_RAT_RLL_P', 'rollI': 'ATC_RAT_RLL_I', 'rollD': 'ATC_RAT_RLL_D', 'rollIMax': 'ATC_RAT_RLL_IMAX',
+    'pitchP': 'ATC_RAT_PIT_P', 'pitchI': 'ATC_RAT_PIT_I', 'pitchD': 'ATC_RAT_PIT_D', 'pitchIMax': 'ATC_RAT_PIT_IMAX',
+    'yawP': 'ATC_RAT_YAW_P', 'yawI': 'ATC_RAT_YAW_I', 'yawD': 'ATC_RAT_YAW_D', 'yawIMax': 'ATC_RAT_YAW_IMAX',
+    'wpnavSpeed': 'WPNAV_SPEED', 'wpnavRadius': 'WPNAV_RADIUS', 'wpnavAccel': 'WPNAV_ACCEL', 
+    'wpnavSpeedUp': 'WPNAV_SPEED_UP', 'wpnavSpeedDn': 'WPNAV_SPEED_DN',
+    'thrAccelP': 'PSC_ACCZ_P', 'thrAccelI': 'PSC_ACCZ_I', 'thrAccelD': 'PSC_ACCZ_D', 'thrAccelIMax': 'PSC_ACCZ_IMAX'
+};
+
+function refreshPIDUI() {
+    let dataFound = false;
+    for (const [inputId, paramName] of Object.entries(PID_MAP)) {
+        const cell = document.getElementById('val_' + paramName);
+        if (cell) {
+            document.getElementById(inputId).value = parseFloat(cell.innerText);
+            dataFound = true;
+        }
+    }
+    const warning = document.getElementById('pidWarning');
+    if (warning) warning.style.display = dataFound ? 'none' : 'block';
+}
+
+async function savePID() {
+    if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu!");
+    const paramsToSend = [];
+    
+    for (const [inputId, paramName] of Object.entries(PID_MAP)) {
+        const inputEl = document.getElementById(inputId);
+        if (!inputEl) continue;
+
+        const newValue = parseFloat(inputEl.value);
+        if (isNaN(newValue)) continue;
+
+        const originalValue = parseFloat(inputEl.dataset.original);
+        if (isNaN(originalValue) || Math.abs(newValue - originalValue) > 0.000001) {
+            paramsToSend.push({ name: paramName, value: newValue });
+        }
+    }
+    
+    if (paramsToSend.length > 0) {
+        const previewList = paramsToSend.map(p => `- ${p.name} : ${p.value}`).join('\n');
+        if (confirm(`Akan mengirim ${paramsToSend.length} modifikasi PID ke Drone:\n\n${previewList}\n\nLanjutkan Write PID?`)) {
+            await sendParamsToBackend('/api/params/write_pid', paramsToSend, 'PID Tuning', false);
+        }
+    } else alert("Tidak ada perubahan PID yang terdeteksi.");
+}
+
+async function saveModes() {
+    if (!isConnected()) return alert("Not connected to FC");
+    const params = [];
+    for (let i = 1; i <= 6; i++) {
+        const modeStr = document.getElementById('mode' + i).value;
+        const modeVal = COPTER_MODE_MAP[modeStr] !== undefined ? COPTER_MODE_MAP[modeStr] : 0;
+        params.push({name: 'FLTMODE' + i, value: modeVal});
+    }
+    await sendParamsToBackend('/api/params/write_pid', params, 'Flight Modes', false);
+}
+
+async function saveParams() {
+    if (!isConnected()) return alert("Not connected to FC");
+    const params = [];
+    
+    document.querySelectorAll('#paramTable tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length === 4) {
+            const key = cells[0].innerText.trim();
+            const valCell = cells[1];
+            let currentVal = parseFloat(valCell.innerText);
+            let originalVal = parseFloat(valCell.dataset.original); 
+            
+            if (!isNaN(currentVal) && (isNaN(originalVal) || Math.abs(currentVal - originalVal) > 0.000001)) {
+                params.push({name: key, value: currentVal});
+            }
+        }
+    });
+    
+    if(params.length > 0) {
+        if (confirm(`Ditemukan ${params.length} parameter yang diubah.\nLanjutkan proses Write to Drone?`)) {
+            await sendParamsToBackend('/api/params/write_parameters', params, 'Parameters', true); 
+        }
+    } else alert("Tidak ada data yang dikirim. Semua angka sudah sesuai dengan memori FC.");
+}
+
+// (Data DEFAULT_FULL_PARAMS disingkat agar code block tidak kepanjangan. Masukkan dictionary asli dari file config.html lama Anda di sini)
+const DEFAULT_FULL_PARAMS = {"ATC_RAT_RLL_P":0.135,"ATC_RAT_PIT_P":0.135}; // <-- GANTI DENGAN DICT LENGKAP ANDA
+
+function initParamTable() {
+    const tbody = document.getElementById('paramTable');
+    if (!tbody) return;
+    tbody.innerHTML = ''; 
+    const fragment = document.createDocumentFragment();
+    const keys = Object.keys(DEFAULT_FULL_PARAMS).sort(); 
+
+    keys.forEach(key => {
+        const val = DEFAULT_FULL_PARAMS[key];
+        const tr = document.createElement('tr');
+        tr.id = 'row_' + key;
+        tr.innerHTML = `
+            <td style="font-weight: bold;">${key}</td>
+            <td id="val_${key}" data-original="${val}" contenteditable="true" style="background-color: rgba(0, 188, 212, 0.1); border: 1px dotted #00bcd4; cursor: text; padding: 4px;">${val}</td>
+            <td>-</td>
+            <td id="desc_${key}"><span style="font-size: 10px; color: #666;">(Default List)</span></td>
+        `;
+        fragment.appendChild(tr);
+    });
+    tbody.appendChild(fragment);
+}
+
+function updateParamTableValues(paramsObj) {
+    if (!paramsObj || Object.keys(paramsObj).length === 0) return;
+    for (const [key, value] of Object.entries(paramsObj)) {
+        const cell = document.getElementById('val_' + key);
+        if (cell) {
+            cell.innerText = value; cell.dataset.original = value; 
+            cell.style.backgroundColor = 'rgba(76, 175, 80, 0.15)'; cell.style.border = '1px solid #4caf50';
+            const desc = document.getElementById('desc_' + key);
+            if (desc) desc.innerHTML = '<span style="font-size: 10px; color: #4caf50; font-weight: bold;">(Loaded from FC)</span>';
+        } else {
+            appendNewParamRow(key, value);
+        }
+    }
+}
+
+function appendNewParamRow(key, val) {
+    const tbody = document.getElementById('paramTable');
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    tr.id = 'row_' + key;
+    tr.innerHTML = `
+        <td style="font-weight: bold;">${key}</td>
+        <td id="val_${key}" data-original="${val}" contenteditable="true" style="background-color: rgba(76, 175, 80, 0.15); border: 1px solid #4caf50; cursor: text; padding: 4px;">${val}</td>
+        <td>-</td>
+        <td id="desc_${key}"><span style="font-size: 10px; color: #4caf50; font-weight: bold;">(Loaded from FC)</span></td>
+    `;
+    tbody.appendChild(tr);
+}
+
+async function fetchParameters() {
+    try {
+        const res = await fetch(getBaseUrl() + '/api/params?t=' + new Date().getTime());
+        const data = await res.json();
+        if (data.status === 'success') {
+            updateParamTableValues(data.parameters);
+            return Object.keys(data.parameters).length;
+        }
+    } catch (e) { console.error("Gagal menarik parameter dari Flask ke UI", e); }
+    return 0;
+}
+
+async function forceDownloadParamsFromFC() {
+    try {
+        await fetch(getBaseUrl() + '/api/params/refresh', { method: 'POST' });
+        
+        let checks = 0, previousCount = 0, stableCount = 0;
+        const checkInterval = setInterval(async () => {
+            const currentCount = await fetchParameters();
+            checks++;
+            if (currentCount > 0 && currentCount === previousCount) stableCount++; else stableCount = 0;
+            previousCount = currentCount;
+
+            if ((stableCount >= 3 && checks > 5) || checks >= 35) clearInterval(checkInterval);
+        }, 1000);
+    } catch (e) {}
+}
+
+async function loadParams() {
+    if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu untuk mengambil parameter asli!");
+    const btns = document.querySelectorAll('.btn-secondary');
+    let refreshBtn = null;
+    btns.forEach(b => { if(b.innerText.includes('Refresh')) refreshBtn = b; });
+    
+    let originalText = "Refresh";
+    if (refreshBtn) { originalText = refreshBtn.innerHTML; refreshBtn.innerHTML = "⏳ Downloading..."; refreshBtn.disabled = true; }
+    
+    try {
+        await fetch(getBaseUrl() + '/api/params/refresh', { method: 'POST' });
+        let checks = 0, previousCount = 0, stableCount = 0;
+
+        const checkInterval = setInterval(async () => {
+            const currentCount = await fetchParameters();
+            checks++;
+            
+            if (currentCount > 0 && currentCount === previousCount) stableCount++; else stableCount = 0;
+            previousCount = currentCount;
+
+            if ((stableCount >= 3 && checks > 5) || checks >= 35) { 
+                clearInterval(checkInterval);
+                if (refreshBtn) { refreshBtn.innerHTML = originalText; refreshBtn.disabled = false; }
+                alert(`Parameter berhasil dimuat! (${currentCount} item)`);
+            }
+        }, 1000);
+    } catch (e) {
+        if (refreshBtn) { refreshBtn.innerHTML = originalText; refreshBtn.disabled = false; }
+        alert("Error: " + e.message);
+    }
+}
+
+function loadFromFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n');
+        let changeCount = 0;
+
+        lines.forEach(line => {
+            line = line.trim();
+            if (line.startsWith('#') || line.length === 0) return;
+
+            let key, value;
+            if (line.includes(',')) {
+                const parts = line.split(','); key = parts[0].trim(); value = parseFloat(parts[1].trim());
+            } else {
+                const parts = line.split(/[\s,]+/); 
+                if (parts.length >= 4 && !isNaN(parts[0]) && !isNaN(parts[1])) { key = parts[2]; value = parseFloat(parts[3]); }
+                else if (parts.length >= 2) { key = parts[0]; value = parseFloat(parts[1]); }
+            }
+
+            if (key && !isNaN(value)) {
+                const cell = document.getElementById('val_' + key);
+                if (cell) {
+                    const originalVal = parseFloat(cell.dataset.original);
+                    if (originalVal !== value) {
+                        cell.innerText = value; cell.style.backgroundColor = 'rgba(255, 152, 0, 0.2)'; cell.style.border = '1px solid #ff9800';
+                        const desc = document.getElementById('desc_' + key);
+                        if(desc) desc.innerHTML = '<span style="color:#ff9800; font-weight:bold;">(Modified from File)</span>';
+                        changeCount++;
+                    }
+                } else { appendNewParamRow(key, value); changeCount++; }
+            }
+        });
+
+        document.getElementById('paramFileInput').value = ''; 
+        if (changeCount > 0) alert(`✅ File berhasil dimuat! Ditemukan ${changeCount} angka yang berbeda (ditandai warna oranye). Klik "Write to Drone" untuk menyimpan.`);
+    };
+    reader.readAsText(file);
+}
+
+function filterParams() {
+    const query = document.getElementById('paramSearch').value.toLowerCase();
+    const rows = document.getElementById('paramTable').getElementsByTagName('tr');
+    for(let i = 0; i < rows.length; i++) {
+        const paramName = rows[i].cells[0].innerText.toLowerCase();
+        rows[i].style.display = paramName.includes(query) ? '' : 'none';
+    }
+}
+
+function resetPID() {
+    if (confirm('Reset sliders to defaults?')) {
+        let restored = 0;
+        for (const [inputId, paramName] of Object.entries(PID_MAP)) {
+            const inputEl = document.getElementById(inputId);
+            if (inputEl && inputEl.dataset.original !== undefined) {
+                inputEl.value = inputEl.dataset.original;
+                inputEl.style.backgroundColor = '';
+                inputEl.style.borderColor = '#00e676';
+                restored++;
+            }
+        }
+        alert(restored > 0 ? "Sliders restored to default values" : "No sliders were restored");
+    }
+}
+
+function exportParams() {
+    let csv = 'Parameter,Value,Unit,Description\n';
+    document.querySelectorAll('#paramTable tr').forEach(row => {
+        const c = row.querySelectorAll('td');
+        if (c.length === 4) csv += `${c[0].innerText},${c[1].innerText},${c[2].innerText},${c[3].innerText}\n`;
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'hawkeye_parameters.csv';
+    a.click();
+}
+
+let lastConnectionState = false;
+
+document.addEventListener('DOMContentLoaded', () => {
+    initParamTable();
+
+    setInterval(() => {
+        const connected = isConnected();
+        
+        if (connected && !lastConnectionState) {
+            console.log("Koneksi FC Terdeteksi! Menunggu 2 detik agar FC stabil...");
+            setTimeout(() => forceDownloadParamsFromFC(), 2000);
+        }
+        lastConnectionState = connected;
+    }, 1000);
+});
+</script>
+</body>
+</html>

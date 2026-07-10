@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup - HAWKEYE GCS</title>
+    <link rel="stylesheet" href="/static/css/gcs.css">
+    <link rel="stylesheet" href="/static/css/setup.css">
+</head>
+
+<body style="background: transparent;">
+
+<div class="setup-container" style="margin-left: 0;"> <!-- Hilangkan margin kiri navbar -->
+    <div class="setup-card">
+        <div class="setup-title">Connection Setup</div>
+        <div id="ipSection" class="ip-section">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>IP Backend (Raspberry / Companion)</label>
+                    <input type="text" id="ipHost" placeholder="192.168.1.50" value="192.168.1.50">
+                </div>
+                <div class="form-group">
+                    <label>Flask Port</label>
+                    <input type="number" id="ipPort" placeholder="5000" value="5000">
+                </div>
+            </div>
+        </div>
+        <div class="button-group">
+            <button id="connectBtn" class="btn btn-primary" onclick="handleConnect()">Connect</button>
+            <button class="btn btn-secondary" onclick="handleDisconnect()">Disconnect</button>
+        </div>
+        <div id="statusInfo" class="status-info"></div>
+        <div class="test-section">
+            <h3>Connection Status</h3>
+            <div class="test-item">
+                <div class="status-dot" id="connectionStatus"></div>
+                <span id="connectionText">Not Connected</span>
+            </div>
+            <div class="test-item">
+                <div class="status-dot error" id="telemetryStatus"></div>
+                <span id="telemetryText">No Data</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== HELPER KONEKSI PARENT =====
+const getGcs = () => window.parent.gcsConnection;
+
+function buildBackendUrl(host, port = '5000') {
+    const rawHost = (host || '').trim().replace(/\/+$/, '');
+    const rawPort = (port || '5000').toString().trim();
+    if (!rawHost) return '';
+    if (rawHost.startsWith('http://') || rawHost.startsWith('https://')) {
+        const url = new URL(rawHost);
+        if (!url.port && rawPort) url.port = rawPort;
+        return url.origin;
+    }
+    if (rawHost.includes(':')) return 'http://' + rawHost;
+    return 'http://' + rawHost + ':' + rawPort;
+}
+
+async function fetchBackendStatus(baseUrl) {
+    try {
+        let resp = await fetch(baseUrl + '/ping', { cache: 'no-store' });
+        if (resp.status === 404) {
+            resp = await fetch(baseUrl + '/status', { cache: 'no-store' });
+        }
+        const result = await readApiResponse(resp);
+        return { ok: resp.ok, result };
+    } catch (err) {
+        return {
+            ok: false,
+            result: {
+                message: `Tidak bisa menghubungi di ${baseUrl}. Pastikan server web di Raspy jalan pada host 0.0.0.0 port 5000, IP/port benar, satu jaringan, dan port tidak diblokir firewall. Detail: ${err.message}`
+            }
+        };
+    }
+}
+
+async function readApiResponse(resp) {
+    const text = await resp.text();
+    let result = {};
+    try {
+        result = text ? JSON.parse(text) : {};
+    } catch (err) {
+        result = {
+            status: 'failed',
+            message: `Server mengembalikan HTTP ${resp.status}, bukan JSON. Restart Flask lalu coba lagi.`
+        };
+    }
+    if (!resp.ok && !result.message) {
+        result.message = `Request gagal dengan HTTP ${resp.status}.`;
+    }
+    return result;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Sinkronisasi status UI dengan Parent Iframe
+    const gcs = getGcs();
+    if (gcs && gcs.isConnected) {
+        updateStatus(true);
+    } else {
+        updateStatus(false);
+    }
+    
+    // Cek konektivitas secara berkala
+    setInterval(updateStatusUI, 2000);
+});
+
+async function handleConnect() {
+    const connectBtn = document.getElementById('connectBtn');
+    connectBtn.disabled = true;
+    showStatus('info', 'Connecting...');
+    try {
+        const host = document.getElementById('ipHost').value;
+        const port = document.getElementById('ipPort').value || '5000';
+        
+        if (!host) {
+            showStatus('error', 'Masukkan IP terlebih dahulu.');
+            return;
+        }
+        
+        const raspyUrl = buildBackendUrl(host, port);
+        localStorage.setItem('raspyUrl', raspyUrl);
+        const statusCheck = await fetchBackendStatus(raspyUrl);
+        const result = statusCheck.result;
+        
+        if (statusCheck.ok) {
+            const gcs = getGcs();
+            if(gcs) {
+                // Terapkan koneksi ke Parent Master
+                gcs.baseUrl = raspyUrl;
+                gcs.remoteBackendMode = true;
+                gcs.isConnected = true;
+                gcs.updateUI(true);
+                gcs.startWebSocket(); // Mulai WebSocket di Parent
+            }
+            
+            showStatus('success', 'Connected to: ' + raspyUrl);
+            updateStatus(true);
+        } else {
+            showStatus('error', result.message || 'Koneksi gagal.');
+        }
+    } catch (err) {
+        console.error(err);
+        showStatus('error', 'Error koneksi: ' + err.message);
+    } finally {
+        connectBtn.disabled = false;
+    }
+}
+
+async function handleDisconnect() {
+    try {
+        const gcs = getGcs();
+        if(gcs) {
+            // Putuskan backend dari server asal
+            if (!gcs.remoteBackendMode) {
+                await fetch(gcs.baseUrl + '/disconnect', {method: 'POST'}).catch(e=>{});
+            }
+            
+            // Kembalikan Parent Master ke setelan lokal awal
+            gcs.isConnected = false;
+            gcs.remoteBackendMode = false;
+            gcs.baseUrl = 'http://localhost:5000';
+            gcs.stopWebSocket(); // Matikan WebSocket di Parent
+            gcs.updateUI(false);
+        }
+        
+        updateStatus(false);
+        showStatus('info', 'Disconnected');
+    } catch (err) {
+        console.error(err);
+        showStatus('error', 'Error disconnect: ' + err.message);
+    }
+}
+
+function showStatus(type, message) {
+    const el = document.getElementById('statusInfo');
+    el.className = 'status-info show ' + type;
+    el.textContent = message;
+}
+
+function updateStatus(connected) {
+    document.getElementById('connectionStatus').className = connected ? 'status-dot ok' : 'status-dot error';
+    document.getElementById('connectionText').textContent = connected ? 'Connected' : 'Not Connected';
+}
+
+async function updateStatusUI() {
+    try {
+        const apiBase = getGcs()?.baseUrl || 'http://localhost:5000';
+        
+        // Mengecek respons heartbeat/status dari backend
+        const resp = await fetch(apiBase + '/status');
+        const data = await resp.json();
+        
+        if (data && data.connected) {
+            document.getElementById('telemetryStatus').className = 'status-dot ok';
+            document.getElementById('telemetryText').innerText = 'Receiving Data';
+        } else {
+            document.getElementById('telemetryStatus').className = 'status-dot error';
+            document.getElementById('telemetryText').innerText = 'No Data';
+        }
+    } catch (err) {
+        document.getElementById('telemetryStatus').className = 'status-dot error';
+        document.getElementById('telemetryText').innerText = 'No Data';
+    }
+}
+</script>
+</body>
+</html>

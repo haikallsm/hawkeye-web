@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight View - HAWKEYE</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/> 
+<link rel="stylesheet" href="/static/css/gcs.css"/>
+<link rel="stylesheet" href="/static/css/flightview.css"/>
+</head>
+
+<body style="background: transparent;">
+
+<div class="main" style="margin-left: 0;"> <!-- Hilangkan margin kiri navbar -->
+    <div id="map"></div>
+
+    <div class="telemetry-panel">
+        <div style="font-size: 11px; color: #888; margin-bottom: 8px; font-weight: bold; text-transform: uppercase;"> TELEMETRY</div>
+
+        <div class="ah-container">
+            <canvas id="gyroCanvas" width="200" height="100"></canvas>
+            <div class="ah-overlay">
+                <div class="ah-bank-scale" id="bankScale"></div>
+                <div class="ah-crosshair"></div>
+            </div>
+        </div>
+
+        <div class="telemetry-grid">
+            <div class="telemetry-item">
+                <div class="telemetry-label">Altitude</div>
+                <div id="altitude" class="telemetry-value">0 m</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Roll</div>
+                <div id="roll" class="telemetry-value">0°</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Pitch</div>
+                <div id="pitch" class="telemetry-value">0°</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Lat / Lon</div>
+                <div id="coords" class="telemetry-value" style="font-size: 10px;">0.00000, 0.00000</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Speed</div>
+                <div id="speed" class="telemetry-value">0 m/s</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Climb Rate</div>
+                <div id="climb" class="telemetry-value">0 m/s</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Flight Mode</div>
+                <div id="flightModeLabel" class="telemetry-value">UNKNOWN</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Throttle</div>
+                <div id="throttleGridValue" class="telemetry-value">0%</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Heading</div>
+                <div id="yaw" class="telemetry-value">0°</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Armed</div>
+                <div id="armGridStatus" class="telemetry-value">DISARMED</div>
+            </div>
+            <div class="telemetry-item">
+                <div class="telemetry-label">Signal</div>
+                <div id="rssiBars" class="signal-container">
+                    <div class="signal-bar bar-1"></div>
+                    <div class="signal-bar bar-2"></div>
+                    <div class="signal-bar bar-3"></div>
+                    <div class="signal-bar bar-4"></div>
+                    <div class="signal-bar bar-5"></div>
+                </div>
+                <div id="rssiValue" class="telemetry-value" style="font-size: 10px; margin-top: 2px;">--%</div>
+            </div>
+
+            <div class="telemetry-item">
+                <div class="telemetry-label">Battery</div>
+                <div id="batteryVoltage" class="telemetry-value">0.0 V</div>
+                <div id="batteryStatusDetail" class="telemetry-detail">0.0 A &middot; 0%</div>
+            </div>
+
+            <div class="telemetry-item" id="rangefinderItem">
+                <div class="telemetry-label">RangeFinder</div>
+                <div id="rangefinderDistance" class="telemetry-value">-- m</div>
+                <div id="rangefinderDetail" class="telemetry-detail">UNKNOWN</div>
+            </div>
+        </div>
+
+        <!-- GPS Status -->
+        <div style="margin-top: 6px; padding: 6px; background: #0a0a1a; border-radius: 2px; border-left: 3px solid #2196f3;">
+            <div style="font-size: 10px; color: #888; margin-bottom: 4px;">GPS</div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div id="gpsIndicator" style="width: 8px; height: 8px; border-radius: 50%; background: #f44336;"></div>
+                <div style="flex: 1;">
+                    <div id="gpsFix" style="font-size: 10px; color: #ccc;">No Fix</div>
+                    <div id="gpsSats" style="font-size: 9px; color: #888;">0 satellites</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid #444; margin-top: 8px; padding-top: 8px; font-size: 9px; color: #888;">
+            <div> <span id="msgCount">0</span> msgs</div>
+            <div> <span id="errorCount">0</span> errors</div>
+        </div>
+    </div>
+
+    <div id="mavlinkLogPanel" class="mavlink-log-panel">
+        <div style="font-size: 10px; color: #00bcd4; padding-bottom: 6px; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;"></div>
+        <div id="mavlinkLogContent"></div>
+    </div>
+
+</div>
+
+<!-- VIDEO POPUP -->
+<div id="videoModal" class="video-modal">
+    <div class="video-content">
+        <span class="close-btn" onclick="closeVideo()">&times;</span>
+        <video id="webrtc-video" autoplay playsinline muted></video>
+        <div id="webrtc-status" class="webrtc-status">Connecting...</div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+// ===== MAP =====
+let map = L.map('map', { zoomControl: true, attributionControl: true }).setView([-7.25, 112.75], 13);
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri',
+    maxZoom: 19
+}).addTo(map);
+
+setTimeout(() => map.invalidateSize(), 200);
+window.addEventListener('resize', () => map.invalidateSize());
+
+let lastLogTime = null;
+let droneMarker = null;
+
+// ===== ARTIFICIAL HORIZON =====
+const gyroCanvas = document.getElementById('gyroCanvas');
+const gyroCtx = gyroCanvas.getContext('2d');
+
+function resizeCanvas() {
+    const parent = gyroCanvas.parentElement;
+    if (gyroCanvas.width !== parent.clientWidth || gyroCanvas.height !== parent.clientHeight) {
+        gyroCanvas.width = parent.clientWidth;
+        gyroCanvas.height = parent.clientHeight;
+    }
+}
+
+function DrawEllipse(ctx, color, linewidth, x, y, width, height) {
+    ctx.lineWidth = linewidth; ctx.strokeStyle = color; ctx.beginPath();
+    ctx.arc(x + width/2, y + height/2, width/2, 0, 2 * Math.PI); ctx.stroke();
+}
+function DrawLine(ctx, color, width, x1, y1, x2, y2) {
+    ctx.lineWidth = width; ctx.strokeStyle = color; ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+function DrawPolygon(ctx, color, width, list) {
+    ctx.lineWidth = width; ctx.fillStyle = color; ctx.beginPath();
+    ctx.moveTo(list[0], list[1]);
+    for (let i = 2; i < list.length; i += 2) ctx.lineTo(list[i], list[i+1]);
+    ctx.closePath(); ctx.fill();
+}
+function drawstring(ctx, string, font, fontsize, color, x, y) {
+    ctx.font = "bold " + fontsize + "px " + font; ctx.fillStyle = color;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(string, x, y);
+}
+
+function drawArtificialHorizon(rollDeg, pitchDeg, yawDeg) {
+    resizeCanvas();
+    const deg2rad = Math.PI / 180;
+    const canvas = gyroCanvas, ctx = gyroCtx;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(-rollDeg * deg2rad);
+
+    const font = "Arial";
+    const fontsize = Math.max(9, canvas.height / 18);
+    const halfwidth = canvas.width / 2, halfheight = canvas.height / 2;
+    const every5deg = -canvas.height / 60;
+    const pitchoffset = -pitchDeg * every5deg;
+
+    const gradObj = ctx.createLinearGradient(0, -halfheight * 2, 0, halfheight * 2);
+    gradObj.addColorStop(0.0, "#1976d2"); 
+    let offset = Math.max(0, Math.min(1, 0.5 + pitchoffset / canvas.height / 2));
+    gradObj.addColorStop(offset, "#64b5f6");
+    gradObj.addColorStop(offset, "#8bc34a"); 
+    gradObj.addColorStop(1.0, "#33691e");
+
+    ctx.fillStyle = gradObj;
+    ctx.fillRect(-halfwidth * 2, -halfheight * 2, halfwidth * 4, halfheight * 4);
+
+    const lengthshort = canvas.width / 15, lengthlong = canvas.width / 10;
+    for (let a = -90; a <= 90; a += 5) {
+        if (a >= pitchDeg - 34 && a <= pitchDeg + 25) { 
+            let yPos = pitchoffset + a * every5deg;
+            if (a % 10 == 0) {
+                DrawLine(ctx, "White", 2, -lengthlong, yPos, lengthlong, yPos);
+                if (a !== 0) {
+                    drawstring(ctx, a, font, fontsize + 1, "White", -lengthlong - 15, yPos);
+                    drawstring(ctx, a, font, fontsize + 1, "White", lengthlong + 15, yPos);
+                }
+            } else {
+                DrawLine(ctx, "White", 1, -lengthshort, yPos, lengthshort, yPos);
+            }
+        }
+    }
+
+    const extra = canvas.height / 15 * 4.9, llex = canvas.height / 66 + 2;
+    DrawPolygon(ctx, "RED", 1, [0, -llex*2 - extra, -llex, -llex - extra, llex, -llex - extra]);
+    for (let a = -60; a <= 60; a += 15) {
+        ctx.restore(); ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(a * deg2rad);
+        drawstring(ctx, Math.abs(a), font, fontsize, "White", 0, -llex * 8 - extra + 12);
+        DrawLine(ctx, "White", 2, 0, -llex * 3 - extra, 0, -llex * 3 - extra - llex);
+    }
+
+    ctx.restore(); ctx.save();
+
+    DrawEllipse(ctx, "red", 2, halfwidth - 10, halfheight - 10, 20, 20);
+    DrawLine(ctx, "red", 2, halfwidth - 25, halfheight, halfwidth - 10, halfheight);
+    DrawLine(ctx, "red", 2, halfwidth + 10, halfheight, halfwidth + 25, halfheight);
+    DrawLine(ctx, "red", 2, halfwidth, halfheight - 10, halfwidth, halfheight - 25);
+
+    const tapeHeight = 22, topY = canvas.height - tapeHeight, centerY = canvas.height - (tapeHeight / 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fillRect(0, topY, canvas.width, tapeHeight);
+    DrawLine(ctx, "white", 2, 0, topY, canvas.width, topY);
+
+    const space = (canvas.width - 10) / 120.0, start = Math.round(yawDeg - 60);
+    for (let a = start; a <= yawDeg + 60; a += 1) {
+        let xPos = 5 + space * (a - start);
+        if (a % 15 == 0) {
+            DrawLine(ctx, "white", 2, xPos, canvas.height, xPos, topY + 2);
+            let disp = ((a % 360) + 360) % 360;
+            let label = disp;
+            if(disp===0) label="N"; else if(disp===45) label="NE"; else if(disp===90) label="E"; else if(disp===135) label="SE";
+            else if(disp===180) label="S"; else if(disp===225) label="SW"; else if(disp===270) label="W"; else if(disp===315) label="NW";
+            drawstring(ctx, label, font, fontsize + 1, "white", xPos, centerY + 1);
+        } else if (a % 5 == 0) {
+            DrawLine(ctx, "white", 1, xPos, canvas.height, xPos, canvas.height - 6);
+        }
+        if (a === Math.round(yawDeg)) {
+            DrawLine(ctx, "red", 2, xPos, canvas.height, xPos, topY);
+        }
+    }
+}
+drawArtificialHorizon(0, 0, 0);
+
+// ===== MAIN TELEMETRY HANDLER =====
+// Terekspos secara global agar index.html (Parent) bisa memanggil fungsi ini via Iframe
+window.updateTelemetryUI = function(data) {
+    if (!data) return;
+
+    if (data.rssi !== undefined) {
+        const rssiValue = Math.max(0, Math.min(100, data.rssi));
+        let bars = 0;
+        if (rssiValue > 5) bars = 1;
+        if (rssiValue > 25) bars = 2;
+        if (rssiValue > 50) bars = 3;
+        if (rssiValue > 70) bars = 4;
+        if (rssiValue > 85) bars = 5;
+
+        let colorClass = 'red';
+        if (rssiValue >= 70) colorClass = 'green';
+        else if (rssiValue >= 40) colorClass = 'yellow';
+
+        const container = document.getElementById('rssiBars');
+        if (container) {
+            const barElements = container.querySelectorAll('.signal-bar');
+            barElements.forEach((bar, index) => {
+                bar.className = `signal-bar bar-${index + 1}`;
+                if (index < bars) bar.classList.add('active', colorClass);
+            });
+        }
+        const rssiValueEl = document.getElementById('rssiValue');
+        if (rssiValueEl) rssiValueEl.innerText = Math.round(rssiValue) + '%';
+    }
+
+    if (data.lat !== undefined && data.lon !== undefined) {
+        const lat = Number(data.lat), lon = Number(data.lon), alt = Number(data.alt) || 0;
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            updateMap({ lat, lon, alt, heading: data.heading, speed: data.speed });
+        }
+        const coordsEl = document.getElementById('coords');
+        if (coordsEl) coordsEl.innerText = (Number.isFinite(lat) ? lat.toFixed(5) : '0.00000') + ', ' + (Number.isFinite(lon) ? lon.toFixed(5) : '0.00000');
+        const altEl = document.getElementById('altitude');
+        if (altEl) altEl.innerText = alt.toFixed(1) + ' m';
+    }
+
+    if (data.speed !== undefined) {
+        const speedEl = document.getElementById('speed');
+        if(speedEl) speedEl.innerText = data.speed.toFixed(1) + ' m/s';
+    }
+    if (data.climb !== undefined) {
+        const climbEl = document.getElementById('climb');
+        if(climbEl) climbEl.innerText = data.climb.toFixed(1) + ' m/s';
+    }
+
+    if (data.roll !== undefined && data.pitch !== undefined) {
+        const rollEl = document.getElementById('roll');
+        const pitchEl = document.getElementById('pitch');
+        const yawEl = document.getElementById('yaw');
+        if (rollEl) rollEl.innerText = data.roll.toFixed(2) + '°';
+        if (pitchEl) pitchEl.innerText = data.pitch.toFixed(2) + '°';
+        if (yawEl) yawEl.innerText = (data.yaw || 0).toFixed(2) + '°';
+        
+        drawArtificialHorizon(data.roll, data.pitch, data.yaw || 0);
+    }
+
+    if (data.battery_voltage !== undefined || data.battery_remaining !== undefined) {
+        const battVoltage = data.battery_voltage || 0;
+        const battCurrent = data.battery_current || 0;
+        const battPercent = data.battery_remaining >= 0 ? data.battery_remaining : 0;
+
+        const battVoltEl = document.getElementById('batteryVoltage');
+        const battDetailEl = document.getElementById('batteryStatusDetail');
+
+        if (battVoltEl) {
+            battVoltEl.innerText = battVoltage.toFixed(1) + ' V';
+            if (battPercent < 20) battVoltEl.style.color = '#f44336'; 
+            else if (battPercent < 40) battVoltEl.style.color = '#ff9800'; 
+            else battVoltEl.style.color = '#05b1ef'; 
+        }
+        if (battDetailEl) battDetailEl.innerText = battCurrent.toFixed(1) + ' A / ' + battPercent + '%';
+    }
+
+    if(data.rangefinder_distance !== undefined) {
+        const distance = data.rangefinder_distance || 0;
+        const isHealthy = !!data.rangefinder_healthy;
+        const sensorType = data.rangefinder_type || 'UNKNOWN';
+
+        const rfDistEl = document.getElementById('rangefinderDistance');
+        const rfDetailEl = document.getElementById('rangefinderDetail');
+
+        if (rfDistEl) {
+            rfDistEl.innerText = isHealthy ? distance.toFixed(2) + ' m' : '-- m';
+            if (!isHealthy) rfDistEl.style.color = '#888';
+            else if (distance < 1.0) rfDistEl.style.color = '#f44336';
+            else if (distance < 3.0) rfDistEl.style.color = '#ff9800';
+            else rfDistEl.style.color = '#05b1ef';
+        }
+        if (rfDetailEl) rfDetailEl.innerText = isHealthy ? sensorType : sensorType + ' (out of range)';
+    }
+
+    if (data.gps_fix_type !== undefined || data.satellites_visible !== undefined) {
+        const fixType = data.gps_fix_type || 0;
+        let fixText = 'No Fix', fixColor = '#f44336';
+        if (fixType === 1) { fixText = '2D Fix'; fixColor = '#ff9800'; }
+        else if (fixType >= 2) { fixText = '3D Fix'; fixColor = '#4caf50'; }
+
+        const gpsIndicator = document.getElementById('gpsIndicator');
+        const gpsFixEl = document.getElementById('gpsFix');
+        const gpsSatsEl = document.getElementById('gpsSats');
+        
+        if (gpsIndicator) gpsIndicator.style.background = fixColor;
+        if (gpsFixEl) gpsFixEl.innerText = fixText;
+        if (gpsSatsEl) gpsSatsEl.innerText = (data.satellites_visible || 0) + ' satellites';
+    }
+
+    if (data.flight_mode !== undefined) {
+        const flightModeEl = document.getElementById('flightModeLabel');
+        if (flightModeEl) flightModeEl.innerText = data.flight_mode;
+    }
+
+    if (data.throttle !== undefined) {
+        const throttleGridEl = document.getElementById('throttleGridValue');
+        if (throttleGridEl) throttleGridEl.innerText = Math.round(data.throttle) + '%';
+    }
+
+    if (data.arm_mode !== undefined || data.is_armed !== undefined) {
+        const isArmed = data.is_armed || (data.arm_mode === 'armed') || false;
+        const armGridEl = document.getElementById('armGridStatus');
+        if (armGridEl) {
+            armGridEl.innerText = isArmed ? 'ARMED' : 'DISARMED';
+            armGridEl.style.color = isArmed ? '#4caf50' : '#f44336';
+        }
+    }
+}
+
+window.updateMavlogUI = function(logItem) {
+    console.log("[LOG] Received:", logItem.text);
+
+    const logContent = document.getElementById('mavlinkLogContent');
+    if (!logContent) return;
+
+    // Hilangkan tulisan default jika ada
+    if (logContent.innerHTML.includes('Menunggu pesan')) logContent.innerHTML = '';
+    
+    const safeText = String(logItem.text).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const timeStr = (typeof logItem.server_time === 'number')
+    ? new Date(logItem.server_time * 1000).toTimeString().split(' ')[0]
+    : new Date().toTimeString().split(' ')[0];
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `log-sev-${logItem.severity ?? 6}`;
+    msgDiv.style.marginBottom = "3px";
+    msgDiv.innerHTML = `<span style="color:#747d8c;">[${timeStr}]</span> ${safeText}`;
+    
+    logContent.appendChild(msgDiv);
+    
+    // Batasi agar tidak lebih dari 100 baris agar browser tidak berat
+    if (logContent.childElementCount > 200) logContent.removeChild(logContent.firstChild);
+    logContent.scrollTop = logContent.scrollHeight;
+};
+
+(function replayLogHistory() {
+    try {
+        const parentConn = window.parent && window.parent.gcsConnection;
+        if (parentConn && Array.isArray(parentConn.logHistory)) {
+            parentConn.logHistory.forEach(logItem => window.updateMavlogUI(logItem));
+        } 
+    } catch (err) {
+        console.error("[LOG] replaying log history:", err);
+    }
+})();
+
+// ===== UPDATE MAP MARKER =====
+function updateMap(data) {
+    const lat = Number(data.lat), lon = Number(data.lon);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || (Math.abs(lat) < 0.000001 && Math.abs(lon) < 0.000001)) {
+        if (droneMarker) { map.removeLayer(droneMarker); droneMarker = null; }
+        return;
+    }
+
+    const heading = Number.isFinite(data.heading) ? data.heading : 0;
+    
+    if (!droneMarker) {
+        const droneIcon = L.divIcon({
+            html: `<div class="drone-marker" style="transform: rotate(${heading}deg);"></div>`,
+            iconSize: [36, 36], iconAnchor: [18, 18], className: 'drone-icon'
+        });
+        droneMarker = L.marker([lat, lon], { icon: droneIcon, zIndexOffset: 500, title: 'Drone Position' })
+            .bindPopup(`<b>Drone</b><br>Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}<br>Alt: ${(Number(data.alt)||0).toFixed(1)}m<br>Heading: ${heading.toFixed(0)}°<br>Speed: ${(Number(data.speed)||0).toFixed(1)} m/s`)
+            .addTo(map);
+    } else {
+        droneMarker.setLatLng([lat, lon]);
+        const icon = droneMarker.getIcon();
+        icon.options.html = `<div class="drone-marker" style="transform: rotate(${heading}deg);"></div>`;
+        droneMarker.setIcon(icon);
+    }
+    map.setView([lat, lon], 15);
+}
+
+// ===== DRAG PANEL =====
+const panel = document.querySelector('.telemetry-panel');
+let isDragging = false, offsetX, offsetY;
+panel.addEventListener('mousedown', e => {
+    isDragging = true;
+    offsetX = e.clientX - panel.offsetLeft;
+    offsetY = e.clientY - panel.offsetTop;
+});
+document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    panel.style.left = (e.clientX - offsetX) + 'px';
+    panel.style.top = (e.clientY - offsetY) + 'px';
+    panel.style.right = 'auto';
+});
+document.addEventListener('mouseup', () => isDragging = false);
+
+// ===== VIDEO STREAMING (WebRTC) =====
+let pc = null;
+window.openVideo = async function() {
+    const modal = document.getElementById('videoModal');
+    const statusText = document.getElementById('webrtc-status');
+    const videoElement = document.getElementById('webrtc-video');
+
+    modal.style.display = 'block';
+    statusText.innerText = 'Connecting Video...';
+    statusText.style.color = '#00bcd4';
+
+    try {
+        // Ambil Base URL secara dinamis dari Parent Induk
+        let apiBase = window.parent.gcsConnection?.baseUrl;
+
+        if (!apiBase || apiBase.includes('localhost') || apiBase.includes('')) {
+            const saveIp = localStorage.getItem('raspyUrl');
+            apiBase = saveIp ? saveIp : 'http://localhost:5000';
+        }
+        console.log("[WebRTC] Using API Base URL:", apiBase);
+
+        const config = {
+            sdpSemantics: 'unified-plan',
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+        };
+        pc = new RTCPeerConnection(config);
+
+        pc.addEventListener('track', function(evt) {
+            if (evt.track.kind === 'video') {
+                videoElement.srcObject = evt.streams[0];
+            }
+        });
+
+        pc.addTransceiver('video', { direction: 'recvonly' });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        await new Promise((resolve) => {
+            if (pc.iceGatheringState === 'complete') resolve();
+            else {
+                function checkState() {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        resolve();
+                    }
+                }
+                pc.addEventListener('icegatheringstatechange', checkState);
+                setTimeout(resolve, 2000); 
+            }
+        });
+
+        const response = await fetch(apiBase + '/webrtc/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sdp: pc.localDescription.sdp,
+                type: pc.localDescription.type
+            })
+        });
+
+        const answer = await response.json();
+
+        if (!response.ok || answer.status === 'failed' || answer.status === 'error') {
+            throw new Error(answer.message || `HTTP Error ${response.status}`);
+        }
+
+        await pc.setRemoteDescription(answer);
+        statusText.innerText = 'Video Connected - Live (WebRTC)';
+        statusText.style.color = '#4caf50'; 
+
+    } catch (err) {
+        statusText.innerText = 'Connection Failed: ' + err.message;
+        statusText.style.color = '#f44336';
+    }
+}
+
+window.closeVideo = function() {
+    document.getElementById('videoModal').style.display = 'none';
+    const videoElement = document.getElementById('webrtc-video');
+    if (videoElement.srcObject) {
+        videoElement.srcObject.getTracks().forEach(track => track.stop());
+        videoElement.srcObject = null;
+    }
+    if (pc) { pc.close(); pc = null; }
+}
+
+// ===== SAR VICTIM DETECTION =====
+let victimMarkers = [];
+const VICTIM_BUFFER_RADIUS_METERS = 10;
+
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+    const dp = (lat2 - lat1) * Math.PI / 180, dl = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function pollVictimDetection() {
+    try {
+        // Ambil Base URL dari Parent Iframe
+        const baseUrl = window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
+        const response = await fetch(baseUrl + '/video/detections');
+        if (!response.ok) throw new Error('HTTP error ' + response.status);
+        
+        const result = await response.json();
+
+        if (result && result.objects) {
+            result.objects.forEach(obj => {
+                if (obj.class === 'person' && obj.confidence > 0.6) {
+                    const vLat = result.lat;
+                    const vLon = result.lon;
+                    
+                    if (Math.abs(vLat) < 0.0001 && Math.abs(vLon) < 0.0001) return; 
+                    
+                    let isDuplicate = victimMarkers.some(m => {
+                        const mLatLng = m.marker.getLatLng();
+                        return getDistanceMeters(vLat, vLon, mLatLng.lat, mLatLng.lng) < VICTIM_BUFFER_RADIUS_METERS;
+                    });
+                    
+                    if (!isDuplicate) {
+                        const bufferCircle = L.circle([vLat, vLon], {
+                            color: 'red',
+                            fillColor: '#f44336',
+                            fillOpacity: 0.15,
+                            radius: VICTIM_BUFFER_RADIUS_METERS,
+                            weight: 1,
+                            dashArray: '5, 5'
+                        }).addTo(map);
+
+                        const victimIcon = L.divIcon({
+                            html: '<div style="font-size: 18px; background: rgba(244, 67, 54, 0.9); border-radius: 50%; width: 30px; height: 30px; text-align: center; line-height: 30px; color: white; border: 2px solid white; box-shadow: 0 0 10px red; font-family: Arial;">🆘</div>',
+                            className: 'victim-icon',
+                            iconSize: [30, 30],
+                            iconAnchor: [15, 15]
+                        });
+                        
+                        const marker = L.marker([vLat, vLon], {icon: victimIcon, zIndexOffset: 1000})
+                            .bindPopup(`
+                                <div style="text-align: center;">
+                                    <b style="color:#f44336; font-size:14px;">🚨 KORBAN TERDETEKSI</b><br>
+                                    <span style="font-size:11px; color:#666;">Zona Eksklusif: Radius ${VICTIM_BUFFER_RADIUS_METERS}m</span><br><br>
+                                    Keyakinan (AI): ${(obj.confidence*100).toFixed(1)}%<br>
+                                    Lat: ${vLat.toFixed(7)}<br>Lon: ${vLon.toFixed(7)}
+                                </div>
+                            `)
+                            .addTo(map);
+                            
+                        marker.openPopup();
+                        victimMarkers.push({ marker: marker, circle: bufferCircle }); 
+                        
+                        const logContent = document.getElementById('mavlinkLogContent');
+                        if(logContent) {
+                            const timeStr = new Date().toTimeString().split(' ')[0];
+                            const msgDiv = document.createElement('div');
+                            msgDiv.style.marginBottom = "3px";
+                            msgDiv.innerHTML = `<span style="color:#f44336; font-weight:bold;">[${timeStr}] 🎯 SAR ALERT: Area Korban Baru (Radius ${VICTIM_BUFFER_RADIUS_METERS}m) dikunci pada ${vLat.toFixed(5)}, ${vLon.toFixed(5)}</span>`;
+                            logContent.appendChild(msgDiv);
+                            logContent.scrollTop = logContent.scrollHeight;
+                        }
+                    }
+                }
+            });
+        }
+    } catch (e) {}
+}
+
+setInterval(pollVictimDetection, 1000);
+
+// ===== UPDATE STATS =====
+function updateStats() {
+    if (!window.parent.gcsConnection) return;
+    const msgCountEl = document.getElementById('msgCount');
+    const errorCountEl = document.getElementById('errorCount');
+    if (msgCountEl) msgCountEl.innerText = window.parent.gcsConnection.isConnected ? 'Live' : '0';
+    if (errorCountEl) errorCountEl.innerText = '0';
+}
+setInterval(updateStats, 1000);
+</script>
+</body>
+</html>

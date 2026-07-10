@@ -1,0 +1,291 @@
+html, body{
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden; 
+    display: flex;
+    flex-direction: column;
+}
+
+videostream {
+    width: 300px;
+    height: 200px;
+    position: left; 
+}
+
+.main {
+    flex: 1; /* Ini kunci agar tidak ada celah di bawah */
+    display: flex; 
+    position: relative;
+    overflow: hidden;
+    margin-top: 0;
+}
+
+/* UI layout: map full background; telemetry panel docked top-right */
+#map, .leaflet-container {
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1;
+}
+
+.telemetry-panel {
+    position: absolute;
+    top: 78px;
+    right: 14px;
+    left: auto !important;
+    height: 85vh; /* 80% of window height */
+    width: 280px;  /* 10% of window width */
+    max-width: 90vw;
+    padding: 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+    overflow-y: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    box-shadow: 0 18px 40px rgba(2, 6, 23, 0.45);
+    z-index: 1000;
+    pointer-events: auto;
+}
+
+
+/* ===== ARTIFICIAL HORIZON ===== */
+.ah-container {
+    width: 100%;
+    height: 160px;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    background: #0a0a0a;
+    position: relative;
+    border: 1px solid #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.ah-container canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.telemetry-grid {
+
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
+    margin-bottom: 8px;
+}
+
+.telemetry-item {
+    background: #1f1f1f;
+    padding: 7px 8px;
+    border-radius: 7px;
+    text-align: left;
+    font-size: 8px;
+    min-height: 56px;
+    color: #00e5ff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border: 1px solid #333;
+    transition: border-color 0.2s;
+}
+
+.telemetry-item:hover {
+    border-color: #00bcd4;
+}
+
+.telemetry-item .telemetry-value {
+    font-size: 10px;
+    font-weight: bold;
+    color: #05b1ef;
+    margin-top: 1px;
+    word-break: break-word;
+}
+
+.telemetry-item .telemetry-label {
+    font-size: 9px;
+    color: #b1a5a5;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+}
+
+.telemetry-item .telemetry-detail {
+    font-size: 8px;
+    color: #b1a5a5;
+    margin-top: 3px;
+    letter-spacing: 0.2px;
+}
+
+.ah-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ah-crosshair {
+    width: 40px;
+    height: 2px;
+    background: #ffeb3b;
+    position: relative;
+}
+
+.ah-crosshair::before,
+.ah-crosshair::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 8px;
+    background: #ffeb3b;
+    top: -3px;
+}
+
+.ah-crosshair::before { left: 0; }
+.ah-crosshair::after { right: 0; }
+
+.ah-bank-scale {
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80%;
+    height: 14px;
+}
+
+/* ===== VIDEO MODAL ===== */
+.video-modal {
+    display: none;
+    bottom: 10px;
+    left:10px;
+    width: 320px;
+    height: 180px;
+    background: black;
+    border-radius: 12px;
+    overflow:hidden;
+    z-index: 3000;
+    box-shadow: 0 0 10px rgba(0,0,0,0.6);
+    position:fixed;
+}
+
+.video-content {
+    width: 100%;
+    height: 100%;
+    position: relative;
+
+}
+
+.video-content video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.close-btn {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 24px;
+    color: white;
+    cursor: pointer;
+    z-index: 10;
+    text-shadow: 0 0 5px rgba(0,0,0,0.7);
+}
+
+/* ===== DRONE MARKER ===== */
+.drone-marker {
+    width: 36px;
+    height: 36px;
+    background-image: url('/static/images/drone.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    transform: rotate(0deg);
+    animation: drone-pulse 1s infinite;
+    transition: transform 0.2s ease-out;
+    animation: drone-pulse 1s infinite;
+}
+
+@keyframes drone-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+.mavlink-log-panel {
+    position: absolute;
+    top: 78px;
+    left: 14px;
+    width: 340px;
+    height: 200px;
+    background: rgba(10, 15, 25, 0.85);
+    border: none;
+    border-radius: 10px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    box-shadow: none;
+    pointer-events: auto;
+}
+
+#mavlinkLogContent {
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Warna teks berdasarkan severity (tingkat keparahan dari MAVLink) */
+.log-sev-0, .log-sev-1, .log-sev-2 { color: #ff4757; font-weight: bold; } /* Emergency/Critical */
+.log-sev-3, .log-sev-4 { color: #ffa502; } /* Warning/Error */
+.log-sev-5, .log-sev-6 { color: #2ed573; } /* Notice/Info */
+.log-sev-7 { color: #a4b0be; } /* Debug */
+
+/* Percantik scrollbar khusus untuk log */
+#mavlinkLogContent::-webkit-scrollbar {
+    width: 4px;
+}
+#mavlinkLogContent::-webkit-scrollbar-thumb {
+    background: rgba(56, 189, 248, 0.5);
+    border-radius: 4px;
+}
+
+.signal-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    height: 18px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.signal-bar {
+    width: 8px;
+    background: #333;
+    border-radius: 1px;
+    transition: background-color 0.2s ease;
+}
+
+/* Ketinggian berundak untuk tiap balok */
+.signal-bar.bar-1 { height: 6px; }
+.signal-bar.bar-2 { height: 9px; }
+.signal-bar.bar-3 { height: 12px; }
+.signal-bar.bar-4 { height: 15px; }
+.signal-bar.bar-5 { height: 18px; }
+
+/* Warna sinyal aktif berdasarkan kekuatan */
+.signal-bar.active.green { background-color: #4caf50; }
+.signal-bar.active.yellow { background-color: #ff9800; }
+.signal-bar.active.red { background-color: #f44336; }
