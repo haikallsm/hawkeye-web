@@ -17,9 +17,7 @@ class GCSTelemetry {
 }
 
 // ===== API Connection Manager =====
-const DEFAULT_BACKEND_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:5000'
-    : 'https://devwebhawkeyenih.run.app';
+const DEFAULT_BACKEND_URL = 'http://127.0.0.1:5000'
 
 class GCSApiClient {
     constructor() {
