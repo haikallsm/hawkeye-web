@@ -24,7 +24,13 @@
     <iframe id="main-frame" src="/flightview"></iframe>
 
     <script src="/static/js/gcs.js"></script>
+    <script src="/static/js/radio-mavlink.js"></script>
     <script>
+        // Instance RadioMavlink dibuat SEKALI di sini (parent, persist lintas
+        // navigasi iframe) -- pola sama persis dengan window.gcsConnection.
+        // setup.html mengaksesnya lewat window.parent.radioMavlink.
+        window.radioMavlink = new RadioMavlink();
+
         // HAPUS inisialisasi ulang window.gcsConnection dan initSocketIO di sini.
         // gcs.js sudah mengurus semuanya dengan sempurna.
         fetch('navbar.html')
@@ -66,6 +72,27 @@
 
                 // Kirim log saat ini
                 if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
+                    frame.contentWindow.updateMavlogUI(logItem);
+                }
+            };
+
+            // ===== Routing data RADIO (jalur independen, terpisah dari Pi) =====
+            // Pakai queue yang sama (iframeReady/logQueue) supaya konsisten
+            // dengan penanganan onMavlog dari gcsConnection di atas.
+            window.radioMavlink.onTelemetry = (data) => {
+                const frame = document.getElementById('main-frame');
+                if (frame?.contentWindow?.updateTelemetryUI) {
+                    frame.contentWindow.updateTelemetryUI(data);
+                }
+            };
+
+            window.radioMavlink.onMavlog = (logItem) => {
+                const frame = document.getElementById('main-frame');
+                if (!iframeReady) {
+                    logQueue.push(logItem);
+                    return;
+                }
+                if (frame?.contentWindow?.updateMavlogUI) {
                     frame.contentWindow.updateMavlogUI(logItem);
                 }
             };
