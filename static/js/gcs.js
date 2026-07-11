@@ -305,6 +305,7 @@ class GCSApiClient {
 
             try {
                 this.radioMavlink.onTelemetry = (data) => {
+                    console.log('[RadioMavlink] Telemetry received:', data);
                     this.telemetry.updateFromApi(data);
                     if (this.onTelemetry) this.onTelemetry(data);
                 };

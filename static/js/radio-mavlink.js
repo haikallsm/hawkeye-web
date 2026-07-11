@@ -316,6 +316,7 @@ class RadioMavlink {
                 while (true) {
                     const { value, done } = await this.reader.read();
                     if (done) break;
+                    console.log('[RadioMavlink] Received', value.length, 'bytes');
                     for (const byte of value) this.parser.feedByte(byte);
                 }
             } catch (err) {
