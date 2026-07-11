@@ -375,14 +375,7 @@ class GCSApiClient {
             alert('Silahkan masukkan IP MAVLink (contoh: 192.168.1.100)');
             return;
         }
-        // Jika user memasukkan host:port di satu input, pakai itu
-        if (host.includes(':')) {
-            const parts = host.split(':');
-            host = parts[0];
-            ip_port = parts[1] || ip_port;
-        }
-        this.baseUrl = this.baseUrl && this.baseUrl.startsWith('http') ? this.baseUrl : window.location.origin;
-        this.remoteBackendMode = false;
+        this.remoteBackendMode = False;
         try {
             const connectData = {
                 type: 'ip',
@@ -398,6 +391,7 @@ class GCSApiClient {
             const data = await resp.json();
             console.log('[connectIP] Response:', data);
             if (data.status === 'success' || resp.ok) {
+                this.currentConnectionName = data.connection_name;
                 this.isConnected = true;
                 this.updateUI(true);
                 this.startWebSocket();
