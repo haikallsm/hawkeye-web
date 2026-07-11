@@ -306,6 +306,25 @@ class GCSApiClient {
             try {
                 this.radioMavlink.onTelemetry = (data) => {
                     console.log('[RadioMavlink] Telemetry received:', data);
+                    let mappedData = { ...data };
+                    
+                    if (data.mode !== undefined) mappedData.flight_mode = data.mode;
+                    if (data.armed !== undefined) {
+                        mappedData.is_armed = data.armed;
+                        mappedData.arm_mode = data.armed ? 'ARMED' : 'DISARMED';
+                    }
+                    if (data.altitude !== undefined) mappedData.alt = data.altitude;
+                    if (data.latitude !== undefined) mappedData.lat = data.latitude;
+                    if (data.longitude !== undefined) mappedData.lon = data.longitude;
+                    
+                    // Ekstrak roll/pitch/yaw dari dalam object attitude
+                    if (data.attitude) {
+                        mappedData.roll = data.attitude.roll;
+                        mappedData.pitch = data.attitude.pitch;
+                        mappedData.yaw = data.attitude.yaw;
+                    }
+
+                    console.log('[Adapter] Data siap dikirim ke UI:', mappedData);
                     this.telemetry.updateFromApi(data);
                     if (this.onTelemetry) this.onTelemetry(data);
                 };
