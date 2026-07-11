@@ -528,7 +528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('Initializing HAWKEYE GCS Master...');
     
     // Persiapan awal UI
-    window.gcsConnection.loadPorts();
+    // window.gcsConnection.loadPorts();
     if (typeof window.gcsConnection.switchMode === 'function') {
         window.gcsConnection.switchMode();
     }
