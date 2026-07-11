@@ -39,9 +39,10 @@ class GCSApiClient {
         this.isFetchingLogs = false;
         this.logHistory = [];
         this.maxLogHistory = 200;
-        this.localSerialPort = null;
-        this.serialReader = null;
-        this.serialWriter = null;
+        // this.localSerialPort = null;
+        // this.serialReader = null;
+        // this.serialWriter = null;
+        this.radioMavlink = new window.RadioMavlink();
     }
 
     startWebSocket() {
@@ -198,10 +199,10 @@ class GCSApiClient {
 
         try {
             // 1. Munculkan popup bawaan Chrome untuk memilih port laptop
-            this.localSerialPort = await navigator.serial.requestPort();
+            const port = await this.radioMavlink.requestPort();
             
             // 2. Ambil informasi port (Chrome membatasi info nama spesifik demi privasi)
-            const portInfo = this.localSerialPort.getInfo();
+            const portInfo = port.getInfo();
             const vendorId = portInfo.usbVendorId ? portInfo.usbVendorId.toString(16) : 'Unknown';
             
             // 3. Masukkan port yang baru saja Anda pilih ke dalam dropdown UI yang sudah ada
@@ -297,44 +298,30 @@ class GCSApiClient {
         
         // Pastikan user sudah men-scan port laptop
         if (portValue === 'webserial') {
-            if (!this.localSerialPort) {
+            if (!this.radioMavlink.port) {
                 alert('Silakan tekan Scan dan pilih port terlebih dahulu!');
                 return;
             }
 
             try {
-                // 1. Buka port antena radio yang menancap di laptop
-                await this.localSerialPort.open({ baudRate: parseInt(baud, 10) });
-                this.currentConnectionName = "WebSerial_Bridge";
+                this.radioMavlink.onTelemetry = (data) => {
+                    this.telemetry.updateFromApi(data);
+                    if (this.onTelemetry) this.onTelemetry(data);
+                };
+                
+                // 2. Tautkan Callback Status Log
+                this.radioMavlink.onMavlog = (logItem) => {
+                    if (this.onMavlog) this.onMavlog(logItem);
+                };
+
+                // 3. Jalankan koneksi dan parser bawaan radio-mavlink.js
+                await this.radioMavlink.connect(parseInt(baud, 10));
+
+                this.currentConnectionName = "Direct_Web_Serial";
                 this.isConnected = true;
                 this.updateUI(true);
 
-                // 2. Beritahu Python (RasPi) agar bersiap menerima data lemparan (Mode UDP lokal)
-                await fetch(this.baseUrl + '/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: 'ip', host: '127.0.0.1', port: 14550 })
-                });
-
-                // 3. Hidupkan WebSocket untuk jembatan data UI
-                this.startWebSocket(); 
-                
-                // Siapkan Reader dan Writer dari port laptop
-                this.serialReader = this.localSerialPort.readable.getReader();
-                this.serialWriter = this.localSerialPort.writable.getWriter();
-
-                // 4. JEMBATAN NAIK: Loop membaca dari Radio Laptop -> Lempar ke RasPi via WebSocket
-                this.readLoop();
-
-                // 5. JEMBATAN TURUN: Menangkap data dari RasPi -> Tulis ke Radio Laptop
-                this.ws.on('raw_serial_down', (data) => {
-                    if (this.serialWriter) {
-                        this.serialWriter.write(new Uint8Array(data));
-                    }
-                });
-
                 if (this.onConnect) this.onConnect();
-
             } catch (err) {
                 this.updateUI(false, true);
                 alert('Gagal membuka port radio laptop: ' + err.message);
@@ -408,27 +395,13 @@ class GCSApiClient {
 
     async disconnect() {
         try {
-            this.stopWebSocket(); // Hentikan WebSocket
-            
-            // if (!this.remoteBackendMode) {
-            //     try { await fetch(this.baseUrl + '/disconnect', { method: 'POST' }); } catch (e) {}
-            // }
+            this.stopWebSocket();
 
-            if (this.serialReader) {
-                try { await this.serialReader.cancel(); } catch(e){}
-                this.serialReader = null;
+            if (this.radioMavlink) {
+                await this.radioMavlink.disconnect();
             }
-            if (this.serialWriter) {
-                try { this.serialWriter.releaseLock(); } catch(e){}
-                this.serialWriter = null;
-            }
-            if (this.localSerialPort) {
-                try { await this.localSerialPort.close(); } catch(e){}
-                this.localSerialPort = null;
-            }
-            // --- AKHIR PENAMBAHAN ---
 
-            if (!this.remoteBackendMode) {
+            if (!this.remoteBackendMode && this.currentConnectionName !== "Direct_Web_Serial") {
                 try { await fetch(this.baseUrl + '/disconnect', { method: 'POST' }); } catch (e) {}
             }
 
