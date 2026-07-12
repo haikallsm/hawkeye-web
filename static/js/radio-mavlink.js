@@ -1,25 +1,35 @@
-// 1. CRC-16/MCRF4XX (X.25) -- algoritma checksum resmi MAVLink
 function mavlinkCrc16Update(crc, byte) {
     let tmp = byte ^ (crc & 0xFF);
     tmp = (tmp ^ (tmp << 4)) & 0xFF;
     return ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xFFFF;
 }
 
-// CRC_EXTRA per message ID -- konstanta resmi dari dialect common.xml.
-// WAJIB benar, kalau salah semua frame pesan itu akan selalu gagal CRC
-// dan otomatis ke-drop tanpa pernah sampai ke decoder.
 const CRC_EXTRA = {
     0: 50,    // HEARTBEAT
     1: 124,   // SYS_STATUS
     24: 24,   // GPS_RAW_INT
     30: 39,   // ATTITUDE
     33: 104,  // GLOBAL_POSITION_INT
+    66: 148,  // REQUEST_DATA_STREAM (dipakai buat KIRIM, bukan cuma terima)
     74: 20,   // VFR_HUD
     253: 83,  // STATUSTEXT
 };
 
-// 2. MAVLink Frame Parser -- state machine byte-per-byte
-//    Mendukung MAVLink v1 (0xFE) dan v2 (0xFD)
+const REQUESTED_STREAMS = [1, 2, 3, 6, 10, 11, 12]; // RAW_SENSORS, EXTENDED_STATUS, RC_CHANNELS, POSITION, EXTRA1, EXTRA2, EXTRA3
+const STREAM_RATE_HZ = 10; // samain dengan STREAM_RATE_HZ di mavlink_core.py
+
+function buildMavlink1Frame(seq, sysid, compid, msgId, payloadBytes, crcExtra) {
+    const len = payloadBytes.length;
+    // Urutan sebelum CRC: STX, len, seq, sysid, compid, msgid, payload
+    const beforeCrc = [len, seq & 0xFF, sysid, compid, msgId, ...payloadBytes];
+
+    let crc = 0xFFFF;
+    for (const b of beforeCrc) crc = mavlinkCrc16Update(crc, b);
+    crc = mavlinkCrc16Update(crc, crcExtra);
+
+    return new Uint8Array([0xFE, ...beforeCrc, crc & 0xFF, (crc >> 8) & 0xFF]);
+}
+
 const PARSE_STATE = {
     IDLE: 0, GOT_STX: 1, GOT_LENGTH: 2, GOT_INCOMPAT: 3, GOT_COMPAT: 4,
     GOT_SEQ: 5, GOT_SYSID: 6, GOT_COMPID: 7, GOT_MSGID: 8, GOT_PAYLOAD: 9,
@@ -83,11 +93,13 @@ class MavlinkFrameParser {
 
             case PARSE_STATE.GOT_SEQ:
                 this.buf.push(byte); // sysid
+                this._sysid = byte;  // simpan terpisah -- dibutuhkan buat REQUEST_DATA_STREAM (target_system)
                 this.state = PARSE_STATE.GOT_SYSID;
                 break;
 
             case PARSE_STATE.GOT_SYSID:
                 this.buf.push(byte); // compid
+                this._compid = byte; // simpan terpisah -- dibutuhkan buat REQUEST_DATA_STREAM (target_component)
                 this.state = PARSE_STATE.GOT_COMPID;
                 break;
 
@@ -153,15 +165,10 @@ class MavlinkFrameParser {
         const receivedCrc = this._crcBytes[0] | (this._crcBytes[1] << 8);
         if (crc !== receivedCrc) return; // CRC gagal, frame korup/salah sync, buang
 
-        this.onFrame(this.msgId, payload);
+        this.onFrame(this.msgId, payload, this._sysid, this._compid);
     }
 }
 
-// ============================================================
-// 3. Decoder per message -- konversi payload bytes -> objek JS
-//    Urutan field WIRE (bukan urutan deklarasi XML!) -- field
-//    di-reorder oleh MAVLink compiler dari besar ke kecil.
-// ============================================================
 function readF32(dv, off) { return dv.getFloat32(off, true); }
 function readU32(dv, off) { return dv.getUint32(off, true); }
 function readI32(dv, off) { return dv.getInt32(off, true); }
@@ -260,7 +267,6 @@ const DECODERS = {
     },
 };
 
-// 4. RadioMavlink -- wrapper Web Serial + reassembly + emit
 class RadioMavlink {
     constructor() {
         this.port = null;
@@ -270,12 +276,65 @@ class RadioMavlink {
 
         this.telemetry = { connected: false, source: 'radio' };
         this.logSeq = 0;
-        this._statustextChunks = {};
+        this._statustextChunks = {}; // { id: { chunkSeq: text } } -- sama pola dengan mavlink_adapter.py
 
+        // --- untuk kirim command (fix "Passive Listener Syndrome") ---
+        this.writer = null;
+        this._txSeq = 0;              // sequence number frame yang KITA kirim
+        this._gcsSysId = 255;         // konvensi umum: GCS pakai sysid 255
+        this._gcsCompId = 190;        // MAV_COMP_ID_MISSIONPLANNER, dipakai banyak GCS
+        this.targetSystem = 1;        // sysid FC, di-update otomatis dari HEARTBEAT masuk
+        this.targetComponent = 1;
+        this._streamsRequested = false;
+        this._lastBaudRate = 57600;
+
+        // Callback publik, isi dari luar (mirip gcs.js punya onTelemetry/onMavlog)
         this.onTelemetry = null;
         this.onMavlog = null;
         this.onConnect = null;
         this.onDisconnect = null;
+
+        this._setupAutoReconnectListeners();
+    }
+
+    async tryAutoReconnect(baudRate = 57600) {
+        if (!('serial' in navigator)) return false;
+        try {
+            const ports = await navigator.serial.getPorts();
+            if (ports.length === 0) return false;
+            this.port = ports[0]; // asumsi 1 radio aktif; kalau multi-device, perlu UI pemilihan
+            await this.connect(baudRate);
+            console.log('[RadioMavlink] Auto-reconnect berhasil ke port yang sudah pernah diizinkan.');
+            return true;
+        } catch (e) {
+            console.warn('[RadioMavlink] Auto-reconnect gagal:', e.message);
+            return false;
+        }
+    }
+
+    _setupAutoReconnectListeners() {
+        if (!('serial' in navigator)) return;
+
+        navigator.serial.addEventListener('disconnect', (event) => {
+            if (this.port && event.target === this.port) {
+                console.warn('[RadioMavlink] Radio ter-unplug secara fisik.');
+                this.telemetry.connected = false;
+                this._streamsRequested = false;
+                if (this.onDisconnect) this.onDisconnect();
+            }
+        });
+
+        navigator.serial.addEventListener('connect', async (event) => {
+            if (!this.keepReading) {
+                console.log('[RadioMavlink] Radio ter-plug kembali, mencoba auto-reconnect...');
+                this.port = event.target;
+                try {
+                    await this.connect(this._lastBaudRate);
+                } catch (e) {
+                    console.warn('[RadioMavlink] Reconnect otomatis gagal:', e.message);
+                }
+            }
+        });
     }
 
     async requestPort() {
@@ -288,15 +347,22 @@ class RadioMavlink {
             throw new Error('Belum ada port dipilih, panggil requestPort() dulu (dari klik tombol).');
         }
         await this.port.open({ baudRate });
+        this._lastBaudRate = baudRate;
+        this.writer = this.port.writable.getWriter();
         this.keepReading = true;
+        this._streamsRequested = false;
         this.telemetry.connected = true;
         if (this.onConnect) this.onConnect();
-        this._readLoop();
+        this._readLoop(); // jalan di background, tidak di-await
     }
 
     async disconnect() {
         this.keepReading = false;
         try {
+            if (this.writer) {
+                await this.writer.close().catch(() => {});
+                this.writer = null;
+            }
             if (this.reader) {
                 await this.reader.cancel();
                 this.reader.releaseLock();
@@ -306,7 +372,33 @@ class RadioMavlink {
             console.warn('[RadioMavlink] Error saat disconnect:', e);
         }
         this.telemetry.connected = false;
+        this._streamsRequested = false;
         if (this.onDisconnect) this.onDisconnect();
+    }
+
+    async _sendFrame(msgId, payloadBytes, crcExtra) {
+        if (!this.writer) return;
+        const frame = buildMavlink1Frame(
+            this._txSeq++, this._gcsSysId, this._gcsCompId,
+            msgId, payloadBytes, crcExtra
+        );
+        try {
+            await this.writer.write(frame);
+        } catch (e) {
+            console.warn(`[RadioMavlink] Gagal kirim msgId=${msgId}:`, e.message);
+        }
+    }
+
+    async requestDataStreams(rateHz = STREAM_RATE_HZ) {
+        for (const streamId of REQUESTED_STREAMS) {
+            // REQUEST_DATA_STREAM payload, urutan WIRE: req_message_rate(u16), target_system(u8),
+            // target_component(u8), req_stream_id(u8), start_stop(u8)
+            const rateBytes = [rateHz & 0xFF, (rateHz >> 8) & 0xFF];
+            const payload = [...rateBytes, this.targetSystem, this.targetComponent, streamId, 1];
+            await this._sendFrame(66, payload, CRC_EXTRA[66]);
+            await new Promise(r => setTimeout(r, 50)); // samain gap 50ms dengan mavlink_core.py
+        }
+        console.log(`[RadioMavlink] Streams di-request @ ${rateHz}Hz (${REQUESTED_STREAMS.length} stream) ke sysid=${this.targetSystem}`);
     }
 
     async _readLoop() {
@@ -316,7 +408,6 @@ class RadioMavlink {
                 while (true) {
                     const { value, done } = await this.reader.read();
                     if (done) break;
-                    console.log('[RadioMavlink] Received', value.length, 'bytes');
                     for (const byte of value) this.parser.feedByte(byte);
                 }
             } catch (err) {
@@ -327,7 +418,14 @@ class RadioMavlink {
         }
     }
 
-    _handleFrame(msgId, payload) {
+    _handleFrame(msgId, payload, sysid, compid) {
+        if (msgId === 0 && !this._streamsRequested) {
+            this.targetSystem = sysid;
+            this.targetComponent = compid;
+            this._streamsRequested = true; // set duluan, cegah request dobel kalau HEARTBEAT numpuk
+            this.requestDataStreams().catch(e => console.warn('[RadioMavlink] requestDataStreams gagal:', e));
+        }
+
         const decoder = DECODERS[msgId];
         if (!decoder) return;
 
@@ -349,6 +447,7 @@ class RadioMavlink {
         }
     }
 
+    // Reassembly chunk STATUSTEXT panjang, sama pola dengan mavlink_adapter.py
     _handleStatustext({ severity, text, msgId, chunkSeq }) {
         let fullText = text;
 
@@ -373,7 +472,7 @@ class RadioMavlink {
             text: fullText,
             severity,
             server_time: Date.now() / 1000,
-            source: 'radio',
+            source: 'radio', // penanda asal pesan, beda dari log UDP via Pi
         };
         if (this.onMavlog) this.onMavlog(logItem);
     }
