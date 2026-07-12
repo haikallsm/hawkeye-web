@@ -25,7 +25,7 @@
                 <option value="115200" selected>115200 baud</option>
                 <option value="57600">57600 baud</option>
             </select>
-            <button onclick="window.gcsConnection.loadPorts()">Scan</button>
+            <button onclick="handleSelectRadioPort()">Scan</button>
         </div>
 
         <div id="ipGroup" class="input-group" style="display: none;">
@@ -34,7 +34,7 @@
         </div>
         
         <!-- Tombol Utama memanggil window.gcsConnection.connect() -->
-        <button id="connectBtn" onclick="window.gcsConnection.connect()">Connect</button>
+        <button id="connectBtn" onclick="handleMainConnect()">Connect</button>
         <span id="statusText">Disconnected</span>
     </div>
 </div>

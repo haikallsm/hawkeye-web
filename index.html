@@ -212,7 +212,7 @@
 
             if (type === 'serial') {
                 const connected = !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
-                statusEl.textContent = connected ? 'Radio Connected' : 'Radio Disconnected';
+                statusEl.textContent = connected ? 'Connected' : 'Disconnected';
                 connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
             } else {
                 const connected = !!(window.gcsConnection && window.gcsConnection.isConnected);
