@@ -1,9 +1,42 @@
+/**
+ * radio-mavlink.js
+ * ============================================================
+ * Parser MAVLink v1/v2 murni JavaScript untuk jalur RADIO independen
+ * (SiK/RFD900 dongle yang dicolok LANGSUNG ke laptop GCS, bukan ke Pi).
+ *
+ * Kenapa modul ini perlu ada terpisah dari mavlink_adapter.py:
+ * Web Serial API cuma bisa diakses dari browser yang memegang device
+ * itu secara fisik. Python di Raspberry Pi tidak punya jalan untuk
+ * baca port USB yang tercolok di laptop lain lewat jaringan tanpa
+ * software tambahan (ser2net/USB-IP). Jadi decode MAVLink utk jalur
+ * radio ini HARUS terjadi di sisi browser.
+ *
+ * Cakupan pesan yang di-decode (cukup untuk preflight/flightview):
+ *   - HEARTBEAT            (armed state, vehicle type, flight mode)
+ *   - SYS_STATUS            (battery voltage/remaining)
+ *   - ATTITUDE               (roll/pitch/yaw)
+ *   - GLOBAL_POSITION_INT (lat/lon/alt/heading)
+ *   - VFR_HUD                (airspeed/groundspeed/climb)
+ *   - GPS_RAW_INT           (fix type, jumlah satelit)
+ *   - STATUSTEXT            (log message dari FC, dengan chunk reassembly)
+ *
+ * Pesan lain diabaikan (bukan di-drop karena bug, memang belum di-handle
+ * -- tambahkan CRC_EXTRA + decoder baru kalau butuh pesan lain).
+ * ============================================================
+ */
+
+// ============================================================
+// 1. CRC-16/MCRF4XX (X.25) -- algoritma checksum resmi MAVLink
+// ============================================================
 function mavlinkCrc16Update(crc, byte) {
     let tmp = byte ^ (crc & 0xFF);
     tmp = (tmp ^ (tmp << 4)) & 0xFF;
     return ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xFFFF;
 }
 
+// CRC_EXTRA per message ID -- konstanta resmi dari dialect common.xml.
+// WAJIB benar, kalau salah semua frame pesan itu akan selalu gagal CRC
+// dan otomatis ke-drop tanpa pernah sampai ke decoder.
 const CRC_EXTRA = {
     0: 50,    // HEARTBEAT
     1: 124,   // SYS_STATUS
@@ -15,9 +48,16 @@ const CRC_EXTRA = {
     253: 83,  // STATUSTEXT
 };
 
+// MAV_DATA_STREAM yang di-request -- SAMA PERSIS dengan _REQUESTED_STREAMS
+// di mavlink_core.py, supaya perilaku radio konsisten dengan backend Pi.
 const REQUESTED_STREAMS = [1, 2, 3, 6, 10, 11, 12]; // RAW_SENSORS, EXTENDED_STATUS, RC_CHANNELS, POSITION, EXTRA1, EXTRA2, EXTRA3
 const STREAM_RATE_HZ = 10; // samain dengan STREAM_RATE_HZ di mavlink_core.py
 
+// ============================================================
+// 1b. Frame ENCODER -- kebalikan dari parser, buat KIRIM command
+//     (REQUEST_DATA_STREAM, dst). Pakai MAVLink v1 sederhana,
+//     ArduPilot menerima v1 dan v2 sama-sama untuk pesan ini.
+// ============================================================
 function buildMavlink1Frame(seq, sysid, compid, msgId, payloadBytes, crcExtra) {
     const len = payloadBytes.length;
     // Urutan sebelum CRC: STX, len, seq, sysid, compid, msgid, payload
@@ -30,6 +70,10 @@ function buildMavlink1Frame(seq, sysid, compid, msgId, payloadBytes, crcExtra) {
     return new Uint8Array([0xFE, ...beforeCrc, crc & 0xFF, (crc >> 8) & 0xFF]);
 }
 
+// ============================================================
+// 2. MAVLink Frame Parser -- state machine byte-per-byte
+//    Mendukung MAVLink v1 (0xFE) dan v2 (0xFD)
+// ============================================================
 const PARSE_STATE = {
     IDLE: 0, GOT_STX: 1, GOT_LENGTH: 2, GOT_INCOMPAT: 3, GOT_COMPAT: 4,
     GOT_SEQ: 5, GOT_SYSID: 6, GOT_COMPID: 7, GOT_MSGID: 8, GOT_PAYLOAD: 9,
@@ -62,13 +106,11 @@ class MavlinkFrameParser {
             case PARSE_STATE.GOT_STX:
                 this.payloadLen = byte;
                 this.buf.push(byte);
+                // v2: byte berikutnya adalah incompat_flags -> GOT_LENGTH menangani itu.
+                // v1: tidak ada incompat/compat flags, byte berikutnya langsung SEQ,
+                // tapi tetap diarahkan ke GOT_LENGTH -- percabangan v1/v2 sudah
+                // ditangani di dalam case GOT_LENGTH di bawah.
                 this.state = PARSE_STATE.GOT_LENGTH;
-                if (this.isV2) {
-                    // v2 punya field incompat_flags & compat_flags sebelum seq
-                } else {
-                    this.state = PARSE_STATE.GOT_SEQ === undefined ? this.state : PARSE_STATE.GOT_COMPAT;
-                    // v1 loncat langsung ke SEQ (tidak ada incompat/compat flags)
-                }
                 break;
 
             case PARSE_STATE.GOT_LENGTH:
@@ -169,6 +211,11 @@ class MavlinkFrameParser {
     }
 }
 
+// ============================================================
+// 3. Decoder per message -- konversi payload bytes -> objek JS
+//    Urutan field WIRE (bukan urutan deklarasi XML!) -- field
+//    di-reorder oleh MAVLink compiler dari besar ke kecil.
+// ============================================================
 function readF32(dv, off) { return dv.getFloat32(off, true); }
 function readU32(dv, off) { return dv.getUint32(off, true); }
 function readI32(dv, off) { return dv.getInt32(off, true); }
@@ -267,12 +314,15 @@ const DECODERS = {
     },
 };
 
+// ============================================================
+// 4. RadioMavlink -- wrapper Web Serial + reassembly + emit
+// ============================================================
 class RadioMavlink {
     constructor() {
         this.port = null;
         this.reader = null;
         this.keepReading = false;
-        this.parser = new MavlinkFrameParser((msgId, payload) => this._handleFrame(msgId, payload));
+        this.parser = new MavlinkFrameParser((msgId, payload, sysid, compid) => this._handleFrame(msgId, payload, sysid, compid));
 
         this.telemetry = { connected: false, source: 'radio' };
         this.logSeq = 0;
@@ -297,6 +347,13 @@ class RadioMavlink {
         this._setupAutoReconnectListeners();
     }
 
+    // ------------------------------------------------------------------
+    // FIX "Web Serial Security Limitation": begitu user PERNAH grant izin
+    // untuk sebuah port (lewat requestPort()), browser boleh membuka
+    // ulang port itu via getPorts() TANPA gesture baru. Ini dipanggil
+    // otomatis saat halaman dibuka -- kalau ada port yang sudah pernah
+    // di-approve, langsung connect tanpa perlu klik apapun.
+    // ------------------------------------------------------------------
     async tryAutoReconnect(baudRate = 57600) {
         if (!('serial' in navigator)) return false;
         try {
@@ -312,12 +369,21 @@ class RadioMavlink {
         }
     }
 
+    // Device di-unplug fisik -> browser fire event 'disconnect'.
+    // Device di-plug ulang -> browser fire event 'connect' (kalau portnya
+    // sudah pernah di-approve sebelumnya) -- dua-duanya TANPA gesture baru.
     _setupAutoReconnectListeners() {
         if (!('serial' in navigator)) return;
 
         navigator.serial.addEventListener('disconnect', (event) => {
             if (this.port && event.target === this.port) {
                 console.warn('[RadioMavlink] Radio ter-unplug secara fisik.');
+                // Reset SEMUA state konek, bukan cuma flag telemetry -- kalau
+                // tidak, event 'connect' berikutnya akan coba reconnect pakai
+                // writer/reader yang masih nyangkut dari sesi lama dan gagal.
+                this.keepReading = false;
+                this.writer = null;
+                this.reader = null;
                 this.telemetry.connected = false;
                 this._streamsRequested = false;
                 if (this.onDisconnect) this.onDisconnect();
@@ -337,6 +403,11 @@ class RadioMavlink {
         });
     }
 
+    /**
+     * Minta user pilih port radio via popup native Chrome/Edge.
+     * HARUS dipanggil dari dalam user gesture (klik tombol), browser
+     * menolak requestPort() kalau dipanggil otomatis tanpa interaksi user.
+     */
     async requestPort() {
         this.port = await navigator.serial.requestPort();
         return this.port;
@@ -376,6 +447,12 @@ class RadioMavlink {
         if (this.onDisconnect) this.onDisconnect();
     }
 
+    // ------------------------------------------------------------------
+    // FIX "Passive Listener Syndrome": radio-mavlink.js sekarang bisa
+    // KIRIM command, tidak cuma dengar. Ini setara dengan
+    // _request_streams() di mavlink_core.py -- minta FC aktif ngirim
+    // ATTITUDE/GPS/dst, bukan cuma HEARTBEAT.
+    // ------------------------------------------------------------------
     async _sendFrame(msgId, payloadBytes, crcExtra) {
         if (!this.writer) return;
         const frame = buildMavlink1Frame(
@@ -419,6 +496,9 @@ class RadioMavlink {
     }
 
     _handleFrame(msgId, payload, sysid, compid) {
+        // HEARTBEAT (id=0) -- tangkap sysid/compid FC & trigger request stream
+        // SEKALI saja per sesi koneksi. Ini yang bikin ATTITUDE/GPS/dst mulai
+        // mengalir -- tanpa ini FC cuma kirim HEARTBEAT (perilaku pasif default).
         if (msgId === 0 && !this._streamsRequested) {
             this.targetSystem = sysid;
             this.targetComponent = compid;
@@ -478,4 +558,5 @@ class RadioMavlink {
     }
 }
 
+// Export global, dipakai langsung dari <script> tag biasa (tanpa bundler)
 window.RadioMavlink = RadioMavlink;
