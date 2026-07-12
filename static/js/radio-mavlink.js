@@ -43,8 +43,10 @@ const CRC_EXTRA = {
     24: 24,   // GPS_RAW_INT
     30: 39,   // ATTITUDE
     33: 104,  // GLOBAL_POSITION_INT
-    66: 148,  // REQUEST_DATA_STREAM (dipakai buat KIRIM, bukan cuma terima)
+    66: 148,  // REQUEST_DATA_STREAM (kirim)
     74: 20,   // VFR_HUD
+    76: 152,  // COMMAND_LONG (kirim)
+    77: 143,  // COMMAND_ACK (terima, buat konfirmasi command)
     253: 83,  // STATUSTEXT
 };
 
@@ -302,6 +304,12 @@ const DECODERS = {
         };
     },
 
+    // COMMAND_ACK (id=77) order: command(u16), result(u8)
+    77: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return { _kind: 'command_ack', command: readU16(dv, 0), result: dv.getUint8(2) };
+    },
+
     // STATUSTEXT (id=253) order: severity(u8), text(char[50]), [id(u16), chunk_seq(u8)] -- ekstensi v2, opsional
     253: (bytes) => {
         const severity = bytes[0];
@@ -478,6 +486,56 @@ class RadioMavlink {
         console.log(`[RadioMavlink] Streams di-request @ ${rateHz}Hz (${REQUESTED_STREAMS.length} stream) ke sysid=${this.targetSystem}`);
     }
 
+    // ------------------------------------------------------------------
+    // COMMAND_LONG generik -- setara conn_manager.send_command_long()
+    // di mavlink_core.py. Kirim command, tunggu COMMAND_ACK sampai
+    // timeout. Radio itu lossy (beda dari WebSocket Pi yang reliable),
+    // jadi timeout WAJIB ada -- tanpa itu Promise bisa nyangkut selamanya
+    // kalau ACK-nya hilang di udara.
+    // ------------------------------------------------------------------
+    async sendCommandLong(command, { p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, waitAck = true, timeout = 3000 } = {}) {
+        // COMMAND_LONG (id=76) wire order: param1..param7(float x7, 28 byte),
+        // command(u16), target_system(u8), target_component(u8), confirmation(u8)
+        // Total = 28 + 2 + 1 + 1 + 1 = 33 byte
+        const buf = new ArrayBuffer(33);
+        const dv = new DataView(buf);
+        [p1, p2, p3, p4, p5, p6, p7].forEach((v, i) => dv.setFloat32(i * 4, v, true));
+        dv.setUint16(28, command, true);
+        dv.setUint8(30, this.targetSystem);
+        dv.setUint8(31, this.targetComponent);
+        dv.setUint8(32, 0); // confirmation = 0 (bukan re-send/repeat command)
+        const payload = Array.from(new Uint8Array(buf));
+
+        if (!waitAck) {
+            await this._sendFrame(76, payload, CRC_EXTRA[76]);
+            return { ok: true, result: null };
+        }
+
+        if (!this._ackWaiters) this._ackWaiters = new Map();
+
+        const ackPromise = new Promise((resolve) => {
+            const timeoutHandle = setTimeout(() => {
+                this._ackWaiters.delete(command);
+                resolve({ ok: false, result: 'timeout' });
+            }, timeout);
+            this._ackWaiters.set(command, { resolve, timeoutHandle });
+        });
+
+        await this._sendFrame(76, payload, CRC_EXTRA[76]);
+        return ackPromise;
+    }
+
+    // MAV_CMD_COMPONENT_ARM_DISARM = 400, param1: 1=arm, 0=disarm
+    async armDisarm(arm) {
+        const result = await this.sendCommandLong(400, { p1: arm ? 1 : 0 });
+        if (result.ok) {
+            console.log(`[RadioMavlink] ${arm ? 'ARM' : 'DISARM'} berhasil dikonfirmasi FC.`);
+        } else {
+            console.warn(`[RadioMavlink] ${arm ? 'ARM' : 'DISARM'} gagal/timeout:`, result.result);
+        }
+        return result;
+    }
+
     async _readLoop() {
         while (this.port.readable && this.keepReading) {
             this.reader = this.port.readable.getReader();
@@ -524,6 +582,20 @@ class RadioMavlink {
             if (this.onTelemetry) this.onTelemetry({ ...this.telemetry });
         } else if (result._kind === 'statustext') {
             this._handleStatustext(result);
+        } else if (result._kind === 'command_ack') {
+            this._handleCommandAck(result.command, result.result);
+        }
+    }
+
+    // Dipanggil saat COMMAND_ACK diterima -- selesaikan Promise yang lagi
+    // nunggu (kalau ada) dari sendCommandLong(). Pola sama dengan
+    // CommandAckWaiter di mavlink_core.py.
+    _handleCommandAck(command, result) {
+        const waiter = this._ackWaiters?.get(command);
+        if (waiter) {
+            this._ackWaiters.delete(command);
+            clearTimeout(waiter.timeoutHandle);
+            waiter.resolve({ ok: result === 0, result }); // MAV_RESULT_ACCEPTED = 0
         }
     }
 
@@ -560,3 +632,8 @@ class RadioMavlink {
 
 // Export global, dipakai langsung dari <script> tag biasa (tanpa bundler)
 window.RadioMavlink = RadioMavlink;
+
+// Version marker -- cek angka ini di console tiap kali curiga file yang
+// ter-deploy bukan versi terbaru (masalah cache browser/CDN). Naikkan
+// nomor ini tiap kali file ini diedit.
+console.log('[RadioMavlink] radio-mavlink.js loaded, version 2');
