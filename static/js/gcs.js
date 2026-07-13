@@ -18,38 +18,57 @@ class GCSTelemetry {
 
 function adaptRadioTelemetry(raw) {
     const RAD2DEG = 180 / Math.PI;
-    const att = raw.attitude || {};
-    return {
-        vehicle_type       : raw.vehicle_type ?? 'UNKNOWN',
-        roll                : (att.roll  ?? 0) * RAD2DEG,
-        pitch               : (att.pitch ?? 0) * RAD2DEG,
-        yaw                 : (att.yaw   ?? 0) * RAD2DEG,
-        lat                 : raw.latitude ?? 0,
-        lon                 : raw.longitude ?? 0,
-        alt                 : raw.altitude ?? 0,
-        heading             : raw.heading ?? 0,
-        speed               : raw.speed ?? 0,
-        climb               : raw.climb ?? 0,
-        throttle            : raw.throttle ?? 0,
-        satellites_visible  : raw.satellites_visible ?? 0,
-        gps_fix_type        : raw.gps_fix_type ?? 0,
-        battery_voltage     : raw.battery_voltage ?? 0,
-        battery_current     : raw.battery_current ?? 0,
-        battery_remaining   : raw.battery_remaining ?? -1,
-        is_armed            : raw.armed ?? false,
-        arm_mode            : raw.armed ? 'ARMED' : 'DISARMED',
-        flight_mode         : raw.mode ?? 'UNKNOWN',
-        status              : raw.connected ? 'connected' : 'disconnected',
-        
-        accel_x: raw.accel_x, accel_y: raw.accel_y, accel_z: raw.accel_z,
-        gyro_x: raw.gyro_x, gyro_y: raw.gyro_y, gyro_z: raw.gyro_z,
-        mag_field: raw.mag_field,
-        
-        source              : 'radio',
-    };
+    
+    // Siapkan wadah kosong, pastikan selalu ada penanda sumber data
+    const out = { source: 'radio' };
+
+    // 1. Data Status & Mode (Berasal dari HEARTBEAT)
+    if (raw.vehicle_type !== undefined) out.vehicle_type = raw.vehicle_type;
+    if (raw.armed !== undefined) {
+        out.is_armed = raw.armed;
+        out.arm_mode = raw.armed ? 'ARMED' : 'DISARMED';
+    }
+    if (raw.mode !== undefined) out.flight_mode = raw.mode;
+    if (raw.connected !== undefined) out.status = raw.connected ? 'connected' : 'disconnected';
+
+    // 2. Data Kemiringan (Berasal dari ATTITUDE)
+    if (raw.attitude) {
+        out.roll = raw.attitude.roll * RAD2DEG;
+        out.pitch = raw.attitude.pitch * RAD2DEG;
+        out.yaw = raw.attitude.yaw * RAD2DEG;
+    }
+
+    // 3. Data Koordinat (Berasal dari GLOBAL_POSITION_INT)
+    if (raw.latitude !== undefined) out.lat = raw.latitude;
+    if (raw.longitude !== undefined) out.lon = raw.longitude;
+    if (raw.altitude !== undefined) out.alt = raw.altitude;
+    if (raw.heading !== undefined) out.heading = raw.heading;
+
+    // 4. Data Kecepatan HUD (Berasal dari VFR_HUD)
+    if (raw.speed !== undefined) out.speed = raw.speed;
+    if (raw.climb !== undefined) out.climb = raw.climb;
+    if (raw.throttle !== undefined) out.throttle = raw.throttle;
+
+    // 5. Data GPS (Berasal dari GPS_RAW_INT)
+    if (raw.satellites_visible !== undefined) out.satellites_visible = raw.satellites_visible;
+    if (raw.gps_fix_type !== undefined) out.gps_fix_type = raw.gps_fix_type;
+
+    // 6. Data Baterai (Berasal dari SYS_STATUS)
+    if (raw.battery_voltage !== undefined) out.battery_voltage = raw.battery_voltage;
+    if (raw.battery_current !== undefined) out.battery_current = raw.battery_current;
+    if (raw.battery_remaining !== undefined) out.battery_remaining = raw.battery_remaining;
+
+    // 7. Data Sensor Mentah untuk Preflight (Berasal dari RAW_IMU)
+    if (raw.accel_x !== undefined) {
+        out.accel_x = raw.accel_x; out.accel_y = raw.accel_y; out.accel_z = raw.accel_z;
+        out.gyro_x = raw.gyro_x; out.gyro_y = raw.gyro_y; out.gyro_z = raw.gyro_z;
+        out.mag_field = raw.mag_field;
+    }
+
+    // Kembalikan objek yang hanya berisi data aktual
+    return out;
 }
 window.adaptRadioTelemetry = adaptRadioTelemetry;
-
 // ===== API Connection Manager =====
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:5000'
 
