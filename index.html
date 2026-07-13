@@ -25,6 +25,7 @@
 
     <script src="/static/js/gcs.js"></script>
     <script src="/static/js/radio-mavlink.js"></script>
+    <script src="/static/js/command.js"></script>
     <script>
         // Instance RadioMavlink dibuat SEKALI di sini (parent, persist lintas
         // navigasi iframe) -- pola sama persis dengan window.gcsConnection.
@@ -103,6 +104,35 @@
                     frame.contentWindow.updateMavlogUI(logItem);
                 }
             };
+
+            window.mavFeature = new MavlinkFeatures({
+                baseUrl: window.gcsConnection?.baseUrl || window.location.origin,
+                useRadio: true
+            });
+            console.log('[MAV] Features mode:', window.mavFeature.getMode());
+
+            if (window.radioMavlink) {
+                window.radioMavlink.tryAutoReconnect().then(connected => {
+                    if (connected && window.mavFeatures) {
+                        window.mavFeatures._mode = 'radio';
+                        window.mavFeatures._radio = window.radioMavlink;
+                        console.log('[MAV] Auto-connected via radio');
+                    }
+                }).catch(() => {});
+            }
+
+            // Sinkronisasi status navbar secara periodik
+            setInterval(() => {
+                updateNavbarStatus();
+                // Update mode mavFeatures jika koneksi berubah
+                if (window.mavFeatures) {
+                    if (window.radioMavlink?.telemetry?.connected) {
+                        window.mavFeatures._mode = 'radio';
+                    } else if (window.gcsConnection?.isConnected) {
+                        window.mavFeatures._mode = 'backend';
+                    }
+                }
+            }, 2000);
         });
 
         function navigateTo(url, el) {
@@ -164,6 +194,11 @@
             statusEl.textContent = 'Connecting radio...';
             try {
                 await window.radioMavlink.connect(baud);
+                // Setelah konek, pastikan mavFeatures menggunakan radio
+                if (window.mavFeatures) {
+                    window.mavFeatures._mode = 'radio';
+                    window.mavFeatures._radio = window.radioMavlink;
+                }
             } catch (err) {
                 alert('Gagal connect radio: ' + err.message);
             }
@@ -171,7 +206,12 @@
         }
 
         async function disconnectRadio() {
-            if (window.radioMavlink) await window.radioMavlink.disconnect();
+            if (window.radioMavlink) {
+                await window.radioMavlink.disconnect();
+                if (window.mavFeatures) {
+                    window.mavFeatures._mode = 'none';
+                }
+            }
             updateNavbarStatus();
         }
 
@@ -181,27 +221,44 @@
         // ============================================================
         async function connectUdp() {
             await window.gcsConnection.connectIP();
+            if (window.mavFeatures) {
+                window.mavFeatures._mode = 'backend';
+                window.mavFeatures._backend = window.gcsConnection;
+            }
             updateNavbarStatus();
         }
 
         async function disconnectUdp() {
             await window.gcsConnection.disconnect();
+            if (window.mavFeatures) {
+                window.mavFeatures._mode = 'none';
+            }
             updateNavbarStatus();
         }
 
         // ============================================================
         // SWITCH -- satu tombol Connect, aksinya ikut dropdown yang dipilih
         // ============================================================
-        function handleMainConnect() {
+        async function handleMainConnect() {
             const type = document.getElementById('connTypeSelect').value;
             const isRadioConnected = !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
             const isUdpConnected = !!(window.gcsConnection && window.gcsConnection.isConnected);
 
             if (type === 'serial') {
-                isRadioConnected ? disconnectRadio() : connectRadio();
+                if (isRadioConnected) {
+                    await disconnectRadio();
+                } else {
+                    await connectRadio();
+                }
             } else {
-                isUdpConnected ? disconnectUdp() : connectUdp();
+                if (isUdpConnected) {
+                    await disconnectUdp();
+                } else {
+                    await connectUdp();
+                }
             }
+            // Setelah koneksi berubah, update status dan pastikan mavFeatures juga aware
+            updateNavbarStatus();
         }
 
         function updateNavbarStatus() {

@@ -357,28 +357,35 @@ function updateDroneMarker(lat, lon, heading) {
 
 // ===== API CALLS KE BACKEND =====
 async function uploadMissionToFC() {
-    if (waypoints.length === 0) return alert('No waypoints to upload. Add waypoints first.');
+    if (waypoints.length === 0) return alert('No waypoints to upload.');
     try {
         const btn = document.querySelector('.sidebar-footer button.primary');
         const originalText = btn.innerText;
         btn.innerText = 'Uploading...'; btn.disabled = true;
 
-        const response = await fetch(getBaseUrl() + '/mission/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ waypoints: waypoints })
-        });
-        
-        const result = await response.json();
-        alert(result.status === 'success' ? 'Mission uploaded successfully!\n' + result.message : 'Upload failed: ' + result.message);
-        
+        // Konversi waypoints ke format yang diharapkan (sesuai MavlinkFeatures)
+        const items = waypoints.map(wp => ({
+            frame: 0, // MAV_FRAME_GLOBAL
+            command: wp.command === 'HOME' ? 0 : (wp.command === 'TAKEOFF' ? 22 : 16),
+            param1: wp.p1 || 0,
+            param2: wp.p2 || 0,
+            param3: wp.p3 || 0,
+            param4: wp.p4 || 0,
+            x: Math.round(wp.lat * 1e7),
+            y: Math.round(wp.lon * 1e7),
+            z: wp.alt || 0
+        }));
+
+        const result = await window.parent.mavFeatures.uploadMission(items);
+        alert(result.ok ? 'Mission uploaded successfully!' : 'Upload failed: ' + result.message);
         btn.innerText = originalText; btn.disabled = false;
     } catch (err) {
-        alert('Error uploading mission: ' + err.message);
+        alert('Error: ' + err.message);
         const btn = document.querySelector('.sidebar-footer button.primary');
         btn.innerText = 'Upload to FC'; btn.disabled = false;
     }
 }
+
 
 async function readMissionFromFC() {
     try {
@@ -386,41 +393,28 @@ async function readMissionFromFC() {
         const originalText = btn.innerText;
         btn.innerText = 'Reading...'; btn.disabled = true;
 
-        const response = await fetch(getBaseUrl() + '/mission/read');
-        const result = await response.json();
-        const commandMap = { 16: 'WAYPOINT', 22: 'TAKEOFF', 21: 'LAND', 20: 'RTL', 17: 'LOITER' };
-        
-        if (result.status === 'success' && result.waypoints) {
-            const loadedWaypoints = result.waypoints.map((wp, idx) => {
-                return {
-                    id: idx, command: wp.command_name || commandMap[wp.command] || wp.command || 'WAYPOINT',
-                    lat: parseFloat(wp.lat), lon: parseFloat(wp.lon), alt: parseFloat(wp.alt) || 30
-                };
-            });
-            waypoints = [];
-            if (result.home) {
-                let hLat = parseFloat(result.home.lat), hLon = parseFloat(result.home.lon), hAlt = parseFloat(result.home.alt) || 0;
-                
-                // Intip dari telemetry parent jika terbaca 0,0
-                if (!isValidCoordinate(hLat, hLon) && window.parent.gcsConnection?.telemetry?.data) {
-                    const tel = window.parent.gcsConnection.telemetry.data;
-                    if (tel.home_lat !== undefined && isValidCoordinate(tel.home_lat, tel.home_lon)) {
-                        hLat = tel.home_lat; hLon = tel.home_lon; hAlt = tel.home_alt || 0;
-                    }
-                }
-                if (isValidCoordinate(hLat, hLon)){
-                    waypoints.push({ id: 0, command: 'HOME', lat: hLat, lon: hLon, alt: hAlt });
-                }
-            }
-            waypoints = waypoints.concat(loadedWaypoints);
-            waypoints.forEach((wp, idx) => wp.id = idx);
-            
-            renderWaypoints(); updateMapPath(); updateStats(); saveWaypointsLocal();
-            alert('Mission loaded from Flight Controller!\n' + result.waypoints.length + ' waypoints loaded');
-        } else {
-            alert('Failed to read mission: ' + result.message);
-        }
-
+        const items = await window.parent.mavFeatures.readMission();
+        // Konversi ke format UI
+        const loadedWaypoints = items.map((item, idx) => ({
+            id: idx,
+            command: item.command === 16 ? 'WAYPOINT' : (item.command === 22 ? 'TAKEOFF' : 'WAYPOINT'),
+            lat: item.x / 1e7,
+            lon: item.y / 1e7,
+            alt: item.z,
+            p1: item.param1 || 0,
+            p2: item.param2 || 0,
+            p3: item.param3 || 0,
+            p4: item.param4 || 0
+        }));
+        // Hapus HOME dulu (akan ditambahkan ulang)
+        waypoints = loadedWaypoints;
+        // Tambahkan HOME jika ada di data
+        // (biasanya misi tidak punya home, jadi kita skip)
+        reindexWaypoints();
+        renderWaypoints();
+        updateMapPath();
+        saveWaypointsLocal();
+        alert('Mission loaded from FC! (' + items.length + ' waypoints)');
         btn.innerText = originalText; btn.disabled = false;
     } catch (err) {
         alert('Error reading mission: ' + err.message);
@@ -443,27 +437,21 @@ async function updateMissionStatus() {
 }
 
 window.setHomeHere = async function(lat, lon) {
-    try{
-        const response = await fetch(getBaseUrl() + '/command/set_home', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ lat: lat, lon: lon, alt: 0 })
-        });
-        const result = await response.json();
-
-        if (result.status === 'success') {
+    try {
+        const result = await window.parent.mavFeatures.setHome(lat, lon);
+        if (result.ok) {
             let homeIndex = waypoints.findIndex(wp => wp.command === 'HOME');
-            const newHomeItem = { id: 0, command: 'HOME', lat: lat, lon: lon, alt: 0, p1: 0, p2: 0, p3: 0, p4: 0 };
-            if (homeIndex !== -1) waypoints[homeIndex] = newHomeItem;
-            else waypoints.unshift(newHomeItem);
-
-            reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal(); map.closePopup();
-            alert('Home position set successfully!');
+            const newHome = { id: 0, command: 'HOME', lat, lon, alt: 0, p1:0,p2:0,p3:0,p4:0 };
+            if (homeIndex !== -1) waypoints[homeIndex] = newHome;
+            else waypoints.unshift(newHome);
+            reindexWaypoints(); renderWaypoints(); updateMapPath(); saveWaypointsLocal();
+            map.closePopup();
+            alert('Home position set!');
         } else {
             alert('Failed to set home: ' + result.message);
         }
     } catch (err) {
-        alert('Error setting home: ' + err.message);
+        alert('Error: ' + err.message);
     }
 }
 

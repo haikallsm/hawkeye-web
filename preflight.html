@@ -158,16 +158,11 @@ const isConnected = () => window.parent.gcsConnection?.isConnected || false;
 async function sendArmDisarm(cmd) {
     if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     if (cmd === 'ARM' && !confirm('Yakin ingin ARM? Pastikan propeller sudah dilepas atau area sekitar aman.')) return;
-
-    logToConsole(`> Sending command: ${cmd}...`);
+    const arm = (cmd === 'ARM');
+    logToConsole(`> Sending ${cmd}...`);
     try {
-        const response = await fetch(getBaseUrl() + '/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cmd: cmd })
-        });
-        const data = await response.json();
-        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+        const result = await window.parent.mavFeatures.armDisarm(arm);
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -228,38 +223,24 @@ function executeMode() {
     switchFlightMode(mode, modeCode);
 }
 
-// ===== SWITCH FLIGHT MODE =====
 async function switchFlightMode(modeName, modeCode) {
     if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
-    logToConsole(`> Switching flight mode to ${modeName.toUpperCase()} (${modeCode})...`);
+    logToConsole(`> Switching flight mode to ${modeName.toUpperCase()}...`);
     try {
-        const response = await fetch(getBaseUrl() + '/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cmd: `MODE:${modeCode}` })
-        });
-        const data = await response.json();
-        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+        const result = await window.parent.mavFeatures.setMode(modeName);
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
 }
 
-// ===== TAKEOFF & LAND =====
 async function sendTakeoff(alt) {
     if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     if (!confirm('Execute Takeoff?')) return;
-    
-    logToConsole(`> Sending command: TAKEOFF...`);
+    logToConsole('> Sending command: TAKEOFF...');
     try {
-        const response = await fetch(getBaseUrl() + '/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // alt 0 memberi tahu backend untuk menggunakan ketinggian default FC
-            body: JSON.stringify({ cmd: 'TAKEOFF', alt: alt }) 
-        });
-        const data = await response.json();
-        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+        const result = await window.parent.mavFeatures.takeoff(alt || 10);
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -270,13 +251,8 @@ async function sendLand() {
     if (!confirm('Land drone?')) return;
     logToConsole('> Sending command: LAND...');
     try {
-        const response = await fetch(getBaseUrl() + '/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cmd: 'LAND' })
-        });
-        const data = await response.json();
-        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+        const result = await window.parent.mavFeatures.land();
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -287,67 +263,39 @@ async function sendRTL() {
     if (!confirm('Return to Launch?')) return;
     logToConsole('> Sending command: RTL...');
     try {
-        const response = await fetch(getBaseUrl() + '/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cmd: 'RTL' })
-        });
-        const data = await response.json();
-        logToConsole(data.status === 'success' ? `System: ${data.message}` : `Error: ${data.message}`);
+        const result = await window.parent.mavFeatures.rtl();
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
 }
 
 async function toggleSafetySwitch() {
+    // Safety switch biasanya menggunakan MAV_CMD_DO_SET_SAFETY_SWITCH = 190
+    // param1: 0=off, 1=on
     if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
-
-    const targetState = safetyIsOff ? 'on' : 'off';
-    logToConsole(`> Sending command: ${targetState.toUpperCase()}...`);
-
+    const targetState = safetyIsOff ? 1 : 0; // 0=off, 1=on
+    logToConsole(`> Setting safety switch to ${targetState ? 'ON' : 'OFF'}...`);
     try {
-        const response = await fetch(getBaseUrl() + '/safety', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state: targetState })
-        });
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            logToConsole(`System: ${data.message}`);
+        const result = await window.parent.mavFeatures.commandLong(190, { p1: targetState });
+        if (result.ok) {
             safetyIsOff = !safetyIsOff;
-            const btn = document.getElementById('btnSafetyToggle');
-            if (btn) btn.innerText = safetyIsOff ? 'Safety: ON' : 'Safety: OFF';
+            logToConsole(`System: Safety ${safetyIsOff ? 'OFF' : 'ON'}`);
         } else {
-            logToConsole(`Error: ${data.message}`);
+            logToConsole(`Error: ${result.message}`);
         }
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
 }
 
-
 async function rebootFC() {
-    if (!confirm("Reboot?")) return;
-    logToConsole("> Mengirim perintah Reboot ke FC...");
+    if (!confirm("Reboot Flight Controller?")) return;
+    logToConsole("> Sending reboot...");
     try {
-        const response = await fetch(getBaseUrl() + '/command/reboot', { method: 'POST' });
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            logToConsole("System: Reboot");
-            const btnReboot = document.getElementById('btnRebootFC');
-            if (btnReboot) btnReboot.style.display = 'none';
-
-            setTimeout(async () => {
-                try {
-                    await fetch(getBaseUrl() + '/disconnect', { method: 'POST' });
-                    logToConsole("Port berhasil dilepas. Silakan tunggu bunyi beep selesai, lalu klik tombol Connect kembali.");
-                } catch (e) {}
-            }, 500);
-        } else {
-            logToConsole(`Error: ${data.message}`);
-        }
+        const result = await window.parent.mavFeatures.reboot();
+        logToConsole(result.ok ? "System: Reboot command accepted" : `Error: ${result.message}`);
+        // Optional: disconnect setelah beberapa detik
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -358,72 +306,55 @@ const TRANSFORM_CHANNEL = 5;
 const PWM_QUAD = 1500;
 const PWM_ROVER = 1900;
 
-function toggleTransform(){
-    if (!isConnected()) {
-        alert('Flight Controller is not connected.');
-    }
+async function toggleTransform() {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     const newMode = currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD';
     const pwm = newMode === 'ROVER' ? PWM_ROVER : PWM_QUAD;
     const btn = document.getElementById('transformBtn');
     btn.disabled = true;
     btn.innerText = `Switching to ${newMode}...`;
     logToConsole(`> Transform to ${newMode.toUpperCase()} (channel ${TRANSFORM_CHANNEL}, PWM ${pwm})...`);
-
-    fetch(getBaseUrl() + '/transform', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode:'newMode.toLowerCase()', channel: TRANSFORM_CHANNEL, pwm: pwm })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if(data.status === 'success') {
-            logToConsole(`System: ${data.message}`);
+    try {
+        const result = await window.parent.mavFeatures.setServo(TRANSFORM_CHANNEL, pwm);
+        if (result.ok) {
             currentTransformMode = newMode;
-            const statusEl = document.getElementById('transformStatus');
-            statusEl.innerText = `Mode: ${newMode.toUpperCase()}`;
-            statusEl.style.color = newMode === 'ROVER' ? '#ff9800' : '#4caf50';
+            document.getElementById('transformStatus').innerText = `Mode: ${newMode.toUpperCase()}`;
+            document.getElementById('transformStatus').style.color = newMode === 'ROVER' ? '#ff9800' : '#4caf50';
             btn.innerText = `Transform to ${newMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
+            logToConsole(`System: ${result.message}`);
         } else {
-            logToConsole(`Error: ${data.message}`);
+            logToConsole(`Error: ${result.message}`);
             btn.innerText = `Transform to ${currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
         }
-        btn.disabled = false;
-        console.log('Sending payload:', { mode: newMode.toLowerCase(), channel: TRANSFORM_CHANNEL, pwm: pwm });
-    })
-    .catch(err => {
+    } catch (err) {
         logToConsole(`Error: ${err.message}`);
-        btn.disabled = false;
         btn.innerText = `Transform to ${currentTransformMode === 'QUAD' ? 'ROVER' : 'QUAD'}`;
-    });
+    }
+    btn.disabled = false;
 }
 
 async function sendCalibration(cmdType) {
     if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
-
-    logToConsole(`> Sending command: ${cmdType}...`);
+    logToConsole(`> Sending calibration: ${cmdType}...`);
+    const mav = window.parent.mavFeatures;
+    let result;
     try {
-        const response = await fetch(getBaseUrl() + '/command/calibrate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: cmdType })
-        });
-        
-        const data = await response.json();
-        if (data.status === 'success') {
-            logToConsole(`System: Accepted ${data.message}`);
-            if (cmdType === 'accel_3axis'){
-                logToConsole("> ")
-                currentCalibPosition = 'level';
-                const btnNext = document.getElementById('btnAccelNext');
-                if (btnNext) btnNext.style.display = 'inline-block';
-            }
-        } else {
-            logToConsole(`Error: ${data.message}`);
+        switch(cmdType) {
+            case 'accel_3axis': result = await mav.calibrateAccel(0); break;
+            case 'accel_level': result = await mav.calibrateLevel(); break;
+            case 'accel_simple': result = await mav.calibrateAccel(1); break;
+            default: logToConsole('Unknown calibration type'); return;
+        }
+        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+        if (cmdType === 'accel_3axis' && result.ok) {
+            currentCalibPosition = 'level';
+            document.getElementById('btnAccelNext').style.display = 'inline-block';
         }
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
 }
+
 
 const COMPASS_ENDPOINT_MAP = {
     'compass_start' : '/command/calibrate/compass/start',
@@ -434,39 +365,23 @@ const COMPASS_ENDPOINT_MAP = {
 let compassStatusPollTimer = null;
 
 async function sendCompassCalibration(cmdType) {
-    if(!isConnected()) { alert('Flight Controller is not connected.'); return; }
-
-    const url = COMPASS_ENDPOINT_MAP[cmdType];
-    if (!url) { logToConsole(`Error: unknown compass command '${cmdType}'`); return; }
-
-    logToConsole(`> Sending command: ${cmdType}...`);
-
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
+    const mav = window.parent.mavFeatures;
     try {
-        const response = await fetch(getBaseUrl() + url, {
-            method: 'POST',
-            headers: {'Content-type': 'application/json'},
-        });
-        const data = await response.json();
-        
-        if(data.status === 'success') {
-            logToConsole(`System: ${data.message}`);
-            if(cmdType === 'compass_start') {
-                logToConsole("> Putar drone ke segala arah (roll+pitch+yaw) hingga semua compass selesai...");
-                startCompassStatusPolling();
-            } else if (cmdType === 'compass_accept') {
-                logToConsole("✓ Compass calibration diterima FC. WAJIB REBOOT agar tersimpan permanen.");
-                stopCompassStatusPolling();
-                const btnReboot = document.getElementById('btnRebootFC');
-                if (btnReboot) {
-                    btnReboot.style.display = 'inline-block';
-                    btnReboot.style.animation = 'pulse 1s infinite';
-                }
-            } else if (cmdType === 'compass_cancel') {
-                stopCompassStatusPolling();
-                resetMagProgressUI();
-            }
-        } else {
-            logToConsole(`Error: ${data.message}`);
+        if (cmdType === 'compass_start') {
+            const result = await mav.calibrateMag(-1); // semua kompas
+            logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+            if (result.ok) startCompassStatusPolling();
+        } else if (cmdType === 'compass_accept') {
+            // Accept di sisi GCS hanya menghentikan polling dan mencatat
+            stopCompassStatusPolling();
+            logToConsole('✓ Compass calibration accepted (GCS side).');
+            document.getElementById('btnRebootFC').style.display = 'inline-block';
+        } else if (cmdType === 'compass_cancel') {
+            const result = await mav.commandLong(241, { p3: 0 }); // cancel calibration
+            logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+            stopCompassStatusPolling();
+            resetMagProgressUI();
         }
     } catch (err) {
         logToConsole(`Error: ${err.message}`);

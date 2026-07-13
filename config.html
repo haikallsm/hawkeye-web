@@ -202,26 +202,40 @@ function refreshPIDUI() {
 async function savePID() {
     if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu!");
     const paramsToSend = [];
-    
     for (const [inputId, paramName] of Object.entries(PID_MAP)) {
         const inputEl = document.getElementById(inputId);
         if (!inputEl) continue;
-
         const newValue = parseFloat(inputEl.value);
         if (isNaN(newValue)) continue;
-
         const originalValue = parseFloat(inputEl.dataset.original);
         if (isNaN(originalValue) || Math.abs(newValue - originalValue) > 0.000001) {
             paramsToSend.push({ name: paramName, value: newValue });
         }
     }
+    if (paramsToSend.length === 0) return alert("Tidak ada perubahan PID.");
+    if (!confirm(`Kirim ${paramsToSend.length} parameter PID ke drone?`)) return;
     
-    if (paramsToSend.length > 0) {
-        const previewList = paramsToSend.map(p => `- ${p.name} : ${p.value}`).join('\n');
-        if (confirm(`Akan mengirim ${paramsToSend.length} modifikasi PID ke Drone:\n\n${previewList}\n\nLanjutkan Write PID?`)) {
-            await sendParamsToBackend('/api/params/write_pid', paramsToSend, 'PID Tuning', false);
+    const btn = event.target;
+    const originalText = btn.innerText;
+    btn.innerText = "Writing..."; btn.disabled = true;
+    try {
+        const mav = window.parent.mavFeatures;
+        let failed = [];
+        for (const p of paramsToSend) {
+            const ok = await mav.setParam(p.name, p.value);
+            if (!ok) failed.push(p.name);
         }
-    } else alert("Tidak ada perubahan PID yang terdeteksi.");
+        if (failed.length === 0) {
+            alert("Semua PID berhasil ditulis!");
+            forceDownloadParamsFromFC();
+        } else {
+            alert("Gagal menulis: " + failed.join(', '));
+        }
+    } catch (err) {
+        alert("Error: " + err.message);
+    } finally {
+        btn.innerText = originalText; btn.disabled = false;
+    }
 }
 
 async function saveModes() {
@@ -230,34 +244,70 @@ async function saveModes() {
     for (let i = 1; i <= 6; i++) {
         const modeStr = document.getElementById('mode' + i).value;
         const modeVal = COPTER_MODE_MAP[modeStr] !== undefined ? COPTER_MODE_MAP[modeStr] : 0;
-        params.push({name: 'FLTMODE' + i, value: modeVal});
+        params.push({ name: 'FLTMODE' + i, value: modeVal });
     }
-    await sendParamsToBackend('/api/params/write_pid', params, 'Flight Modes', false);
+    const btn = event.target;
+    const originalText = btn.innerText;
+    btn.innerText = "Writing..."; btn.disabled = true;
+    try {
+        const mav = window.parent.mavFeatures;
+        let failed = [];
+        for (const p of params) {
+            const ok = await mav.setParam(p.name, p.value);
+            if (!ok) failed.push(p.name);
+        }
+        if (failed.length === 0) {
+            alert("Flight modes saved!");
+            forceDownloadParamsFromFC();
+        } else {
+            alert("Gagal menyimpan mode: " + failed.join(', '));
+        }
+    } catch (err) {
+        alert("Error: " + err.message);
+    } finally {
+        btn.innerText = originalText; btn.disabled = false;
+    }
 }
 
 async function saveParams() {
     if (!isConnected()) return alert("Not connected to FC");
     const params = [];
-    
     document.querySelectorAll('#paramTable tr').forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length === 4) {
             const key = cells[0].innerText.trim();
             const valCell = cells[1];
             let currentVal = parseFloat(valCell.innerText);
-            let originalVal = parseFloat(valCell.dataset.original); 
-            
+            let originalVal = parseFloat(valCell.dataset.original);
             if (!isNaN(currentVal) && (isNaN(originalVal) || Math.abs(currentVal - originalVal) > 0.000001)) {
-                params.push({name: key, value: currentVal});
+                params.push({ name: key, value: currentVal });
             }
         }
     });
+    if (params.length === 0) return alert("Tidak ada perubahan parameter.");
+    if (!confirm(`Kirim ${params.length} parameter ke drone?`)) return;
     
-    if(params.length > 0) {
-        if (confirm(`Ditemukan ${params.length} parameter yang diubah.\nLanjutkan proses Write to Drone?`)) {
-            await sendParamsToBackend('/api/params/write_parameters', params, 'Parameters', true); 
+    const btn = event.target;
+    const originalText = btn.innerText;
+    btn.innerText = "Writing..."; btn.disabled = true;
+    try {
+        const mav = window.parent.mavFeatures;
+        let failed = [];
+        for (const p of params) {
+            const ok = await mav.setParam(p.name, p.value);
+            if (!ok) failed.push(p.name);
         }
-    } else alert("Tidak ada data yang dikirim. Semua angka sudah sesuai dengan memori FC.");
+        if (failed.length === 0) {
+            alert("Semua parameter berhasil ditulis!");
+            forceDownloadParamsFromFC();
+        } else {
+            alert("Gagal menulis: " + failed.join(', '));
+        }
+    } catch (err) {
+        alert("Error: " + err.message);
+    } finally {
+        btn.innerText = originalText; btn.disabled = false;
+    }
 }
 
 // (Data DEFAULT_FULL_PARAMS disingkat agar code block tidak kepanjangan. Masukkan dictionary asli dari file config.html lama Anda di sini)
@@ -316,61 +366,41 @@ function appendNewParamRow(key, val) {
 
 async function fetchParameters() {
     try {
-        const res = await fetch(getBaseUrl() + '/api/params?t=' + new Date().getTime());
-        const data = await res.json();
-        if (data.status === 'success') {
-            updateParamTableValues(data.parameters);
-            return Object.keys(data.parameters).length;
-        }
-    } catch (e) { console.error("Gagal menarik parameter dari Flask ke UI", e); }
-    return 0;
+        const mav = window.parent.mavFeatures;
+        const params = await mav.getAllParams();
+        updateParamTableValues(params);
+        return Object.keys(params).length;
+    } catch (e) {
+        console.error("Gagal ambil parameter:", e);
+        return 0;
+    }
 }
 
 async function forceDownloadParamsFromFC() {
     try {
-        await fetch(getBaseUrl() + '/api/params/refresh', { method: 'POST' });
-        
-        let checks = 0, previousCount = 0, stableCount = 0;
-        const checkInterval = setInterval(async () => {
-            const currentCount = await fetchParameters();
-            checks++;
-            if (currentCount > 0 && currentCount === previousCount) stableCount++; else stableCount = 0;
-            previousCount = currentCount;
-
-            if ((stableCount >= 3 && checks > 5) || checks >= 35) clearInterval(checkInterval);
-        }, 1000);
-    } catch (e) {}
+        // Refresh dengan meminta ulang semua parameter
+        const mav = window.parent.mavFeatures;
+        const params = await mav.getAllParams();
+        updateParamTableValues(params);
+        const count = Object.keys(params).length;
+        alert(`Parameter berhasil dimuat! (${count} item)`);
+    } catch (err) {
+        alert("Gagal memuat parameter: " + err.message);
+    }
 }
 
+// Ubah juga fungsi loadParams untuk menggunakan forceDownloadParamsFromFC
 async function loadParams() {
-    if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu untuk mengambil parameter asli!");
-    const btns = document.querySelectorAll('.btn-secondary');
-    let refreshBtn = null;
-    btns.forEach(b => { if(b.innerText.includes('Refresh')) refreshBtn = b; });
-    
-    let originalText = "Refresh";
-    if (refreshBtn) { originalText = refreshBtn.innerHTML; refreshBtn.innerHTML = "⏳ Downloading..."; refreshBtn.disabled = true; }
-    
+    if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu!");
+    const btn = document.querySelector('.btn-secondary');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = "⏳ Downloading..."; btn.disabled = true;
     try {
-        await fetch(getBaseUrl() + '/api/params/refresh', { method: 'POST' });
-        let checks = 0, previousCount = 0, stableCount = 0;
-
-        const checkInterval = setInterval(async () => {
-            const currentCount = await fetchParameters();
-            checks++;
-            
-            if (currentCount > 0 && currentCount === previousCount) stableCount++; else stableCount = 0;
-            previousCount = currentCount;
-
-            if ((stableCount >= 3 && checks > 5) || checks >= 35) { 
-                clearInterval(checkInterval);
-                if (refreshBtn) { refreshBtn.innerHTML = originalText; refreshBtn.disabled = false; }
-                alert(`Parameter berhasil dimuat! (${currentCount} item)`);
-            }
-        }, 1000);
-    } catch (e) {
-        if (refreshBtn) { refreshBtn.innerHTML = originalText; refreshBtn.disabled = false; }
-        alert("Error: " + e.message);
+        await forceDownloadParamsFromFC();
+    } catch (err) {
+        alert("Error: " + err.message);
+    } finally {
+        btn.innerHTML = originalText; btn.disabled = false;
     }
 }
 
