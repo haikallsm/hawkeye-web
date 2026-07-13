@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HAWKEYE GCS Master</title>
-    <!-- Masukkan CSS Navbar dan GCS di sini -->
     <link rel="stylesheet" href="/static/css/navbar.css">
     <link rel="stylesheet" href="/static/css/gcs.css">
     <script src="/static/js/socket.io.min.js"></script>
@@ -15,29 +14,24 @@
 </head>
 <body>
     
-    <!-- Render Navbar di Master -->
-    <!-- {% include 'navbar.html' %} -->
-     <div id="navbar-placeholder"></div>
+    <div id="navbar-placeholder"></div>
 
     <!-- Iframe tempat halaman anak (flightview, mission, dll) diputar -->
-    <!-- Default URL arahkan ke route Flask untuk FlightView -->
     <iframe id="main-frame" src="/flightview"></iframe>
 
     <script src="/static/js/gcs.js"></script>
     <script src="/static/js/radio-mavlink.js"></script>
     <script src="/static/js/command.js"></script>
     <script>
-        // Instance RadioMavlink dibuat SEKALI di sini (parent, persist lintas
-        // navigasi iframe) -- pola sama persis dengan window.gcsConnection.
-        // setup.html mengaksesnya lewat window.parent.radioMavlink.
+        // 1. Inisialisasi Radio MAVLink
         window.radioMavlink = new RadioMavlink();
-        // Coba sambung ulang otomatis ke radio yang SUDAH PERNAH di-approve
-        // user sebelumnya (getPorts(), bukan requestPort() -- tidak butuh
-        // klik baru). Kalau belum pernah approve port apapun, ini no-op diam-diam.
         window.radioMavlink.tryAutoReconnect().catch(() => {});
 
-        // HAPUS inisialisasi ulang window.gcsConnection dan initSocketIO di sini.
-        // gcs.js sudah mengurus semuanya dengan sempurna.
+        // 2. PATCH BUG 1: Buat alias untuk iframe anak (config, mission, preflight)
+        // Mereka akan memanggil window.parent.mavFeatures yang sekarang merujuk ke commands
+        window.mavFeatures = window.commands;
+
+        // Memuat Navbar
         fetch('navbar.html')
             .then(response => response.text())
             .then(data => {
@@ -68,25 +62,25 @@
             // Timpa fungsi onMavlog dari gcs.js untuk menambahkan fitur antrean (Queue)
             window.gcsConnection.onMavlog = (logItem) => {
                 const frame = document.getElementById('main-frame');
-
-                // Jika iframe belum siap, simpan ke antrian
                 if (!iframeReady) {
                     logQueue.push(logItem);
                     return;
                 }
-
-                // Kirim log saat ini
                 if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
                     frame.contentWindow.updateMavlogUI(logItem);
                 }
             };
 
+            // ===== PATCH BUG 2: Routing data RADIO =====
             window.radioMavlink.onTelemetry = (data) => {
                 const adaptedData = window.adaptRadioTelemetry(data);
-
-                if(window.gcsConnection && window.gcsConnection.telemetry){
-                    window.gcsConnection.telemetry.updateTelemetryUI(adaptedData);
+                
+                // Simpan ke "Otak Utama" (Global Store) agar tab Mission & Preflight tidak buta
+                if (window.gcsConnection && window.gcsConnection.telemetry) {
+                    window.gcsConnection.telemetry.updateFromApi(adaptedData);
                 }
+
+                // Dorong ke Iframe UI yang sedang aktif (Flight View)
                 const frame = document.getElementById('main-frame');
                 if (frame?.contentWindow?.updateTelemetryUI) {
                     frame.contentWindow.updateTelemetryUI(adaptedData);
@@ -104,33 +98,9 @@
                 }
             };
 
-            window.mavFeature = new MavlinkFeatures({
-                baseUrl: window.gcsConnection?.baseUrl || window.location.origin,
-                useRadio: true
-            });
-            console.log('[MAV] Features mode:', window.mavFeature.getMode());
-
-            if (window.radioMavlink) {
-                window.radioMavlink.tryAutoReconnect().then(connected => {
-                    if (connected && window.mavFeatures) {
-                        window.mavFeatures._mode = 'radio';
-                        window.mavFeatures._radio = window.radioMavlink;
-                        console.log('[MAV] Auto-connected via radio');
-                    }
-                }).catch(() => {});
-            }
-
             // Sinkronisasi status navbar secara periodik
             setInterval(() => {
                 updateNavbarStatus();
-                // Update mode mavFeatures jika koneksi berubah
-                if (window.mavFeatures) {
-                    if (window.radioMavlink?.telemetry?.connected) {
-                        window.mavFeatures._mode = 'radio';
-                    } else if (window.gcsConnection?.isConnected) {
-                        window.mavFeatures._mode = 'backend';
-                    }
-                }
             }, 2000);
         });
 
@@ -147,8 +117,6 @@
         }
 
         function triggerCamera() {
-            // WebRTC/kamera -- JALUR TERPISAH, tidak boleh tercampur dengan
-            // logic connect telemetry (radio/UDP) di bawah ini.
             const frame = document.getElementById('main-frame');
             if (frame.contentWindow && typeof frame.contentWindow.openVideo === 'function') {
                 frame.contentWindow.openVideo();
@@ -162,12 +130,6 @@
             updateNavbarStatus();
         }
 
-        // ============================================================
-        // RADIO (Serial) -- Web Serial API, murni di browser.
-        // TIDAK PERNAH mengirim apapun ke backend Pi. Kalau kamu buka
-        // terminal Flask dan berharap lihat log di sini, itu keliru --
-        // cek Console browser (F12) untuk log dari radio-mavlink.js.
-        // ============================================================
         async function handleSelectRadioPort() {
             if (!window.radioMavlink) { alert('Modul radio-mavlink.js belum termuat.'); return; }
             if (!('serial' in navigator)) {
@@ -179,25 +141,20 @@
                 const select = document.getElementById('portSelect');
                 if (select) select.innerHTML = '<option value="selected" selected>Port radio dipilih</option>';
             } catch (err) {
-                console.log('Pemilihan port radio dibatalkan:', err); // user cancel popup, bukan error
+                console.log('Pemilihan port radio dibatalkan:', err); 
             }
         }
 
         async function connectRadio() {
             const statusEl = document.getElementById('statusText');
             if (!window.radioMavlink || !window.radioMavlink.port) {
-                alert('Pilih port radio dulu (tombol "Pilih Port").');
+                alert('Pilih port radio dulu (tombol "Scan" / "Pilih Port").');
                 return;
             }
             const baud = parseInt(document.getElementById('baudSelect').value, 10);
             statusEl.textContent = 'Connecting radio...';
             try {
                 await window.radioMavlink.connect(baud);
-                // Setelah konek, pastikan mavFeatures menggunakan radio
-                if (window.mavFeatures) {
-                    window.mavFeatures._mode = 'radio';
-                    window.mavFeatures._radio = window.radioMavlink;
-                }
             } catch (err) {
                 alert('Gagal connect radio: ' + err.message);
             }
@@ -207,37 +164,20 @@
         async function disconnectRadio() {
             if (window.radioMavlink) {
                 await window.radioMavlink.disconnect();
-                if (window.mavFeatures) {
-                    window.mavFeatures._mode = 'none';
-                }
             }
             updateNavbarStatus();
         }
 
-        // ============================================================
-        // UDP/IP -- dikirim ke backend Pi lewat window.gcsConnection
-        // (jalur asli, tidak berubah -- Pi yang buka koneksi ke ESP32)
-        // ============================================================
         async function connectUdp() {
             await window.gcsConnection.connectIP();
-            if (window.mavFeatures) {
-                window.mavFeatures._mode = 'backend';
-                window.mavFeatures._backend = window.gcsConnection;
-            }
             updateNavbarStatus();
         }
 
         async function disconnectUdp() {
             await window.gcsConnection.disconnect();
-            if (window.mavFeatures) {
-                window.mavFeatures._mode = 'none';
-            }
             updateNavbarStatus();
         }
 
-        // ============================================================
-        // SWITCH -- satu tombol Connect, aksinya ikut dropdown yang dipilih
-        // ============================================================
         async function handleMainConnect() {
             const type = document.getElementById('connTypeSelect').value;
             const isRadioConnected = !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
@@ -256,7 +196,6 @@
                     await connectUdp();
                 }
             }
-            // Setelah koneksi berubah, update status dan pastikan mavFeatures juga aware
             updateNavbarStatus();
         }
 
@@ -277,7 +216,6 @@
             }
         }
 
-        // Refresh berkala -- navbar tetap konsisten walau pindah halaman/iframe reload
         setInterval(updateNavbarStatus, 1500);
         document.addEventListener('DOMContentLoaded', () => setTimeout(updateNavbarStatus, 500));
     </script>
