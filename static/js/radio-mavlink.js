@@ -757,8 +757,16 @@ class RadioMavlink {
         const decoder = DECODERS[msgId];
         if (!decoder) return;
 
+        const paddedPayload = new Uint8Array(255);
+        paddedPayload.set(payload, 0);
+
         let result;
-        try { result = decoder(payload); } catch (e) { return; }
+        try { 
+            result = decoder(paddedPayload); // <--- Gunakan data yang sudah diganjal
+        } catch (e) { 
+            console.error(`Gagal memproses pesan MAVLink ID ${msgId}:`, e);
+            return; 
+        }
 
         if (result._kind === 'telemetry') {
             delete result._kind;
