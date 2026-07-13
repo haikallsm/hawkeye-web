@@ -26,19 +26,27 @@ function adaptRadioTelemetry(raw) {
         yaw                 : (att.yaw   ?? 0) * RAD2DEG,
         lat                 : raw.latitude ?? 0,
         lon                 : raw.longitude ?? 0,
-        alt                 : raw.altitude ?? 0,     // sudah relative_alt (di atas home)
+        alt                 : raw.altitude ?? 0,
         heading             : raw.heading ?? 0,
         speed               : raw.speed ?? 0,
         climb               : raw.climb ?? 0,
+        throttle            : raw.throttle ?? 0,    // <--- Tambahan
         satellites_visible  : raw.satellites_visible ?? 0,
         gps_fix_type        : raw.gps_fix_type ?? 0,
         battery_voltage     : raw.battery_voltage ?? 0,
+        battery_current     : raw.battery_current ?? 0, // <--- Tambahan
         battery_remaining   : raw.battery_remaining ?? -1,
         is_armed            : raw.armed ?? false,
         arm_mode            : raw.armed ? 'ARMED' : 'DISARMED',
         flight_mode         : raw.mode ?? 'UNKNOWN',
         status              : raw.connected ? 'connected' : 'disconnected',
-        source              : 'radio', // penanda tambahan -- bukan field asli Python
+        
+        // <--- Tambahan Data Sensor IMU untuk Preflight
+        accel_x: raw.accel_x, accel_y: raw.accel_y, accel_z: raw.accel_z,
+        gyro_x: raw.gyro_x, gyro_y: raw.gyro_y, gyro_z: raw.gyro_z,
+        mag_field: raw.mag_field,
+        
+        source              : 'radio',
     };
 }
 window.adaptRadioTelemetry = adaptRadioTelemetry;

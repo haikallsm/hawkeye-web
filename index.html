@@ -81,16 +81,15 @@
                 }
             };
 
-            // ===== Routing data RADIO (jalur independen, terpisah dari Pi) =====
-            // Pakai queue yang sama (iframeReady/logQueue) supaya konsisten
-            // dengan penanganan onMavlog dari gcsConnection di atas.
             window.radioMavlink.onTelemetry = (data) => {
+                const adaptedData = window.adaptRadioTelemetry(data);
+
+                if(window.gcsConnection && window.gcsConnection.telemetry){
+                    window.gcsConnection.telemetry.updateTelemetryUI(adaptedData);
+                }
                 const frame = document.getElementById('main-frame');
                 if (frame?.contentWindow?.updateTelemetryUI) {
-                    // adaptRadioTelemetry (didefinisikan di gcs.js) memetakan
-                    // format raw radio-mavlink.js -> format data_store Python
-                    // (mode->flight_mode, armed->is_armed, attitude rad->roll/pitch/yaw deg, dst)
-                    frame.contentWindow.updateTelemetryUI(window.adaptRadioTelemetry(data));
+                    frame.contentWindow.updateTelemetryUI(adaptedData);
                 }
             };
 

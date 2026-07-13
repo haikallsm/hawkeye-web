@@ -37,6 +37,7 @@ const CRC_EXTRA = {
     22: 220,   // PARAM_VALUE
     23: 168,   // PARAM_SET
     24: 24,    // GPS_RAW_INT
+    27: 144,   // RAW_IMU
     30: 39,    // ATTITUDE
     33: 104,   // GLOBAL_POSITION_INT
     43: 132,   // MISSION_REQUEST_LIST
@@ -217,7 +218,8 @@ const DECODERS = {
     },
     1: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
-        return { _kind:'telemetry', battery_voltage: readU16(dv,14)/1000, battery_remaining: dv.getInt8(30) };
+        // Tambahkan pembacaan arus (battery_current) di offset 16
+        return { _kind:'telemetry', battery_voltage: readU16(dv,14)/1000, battery_current: dv.getInt16(16,true)/100, battery_remaining: dv.getInt8(30) };
     },
     // PARAM_VALUE (id=22) -- wire order verified: param_value(f,0), param_count(u16,4),
     // param_index(u16,6), param_id(char[16],8), param_type(u8,24)
@@ -231,6 +233,16 @@ const DECODERS = {
         const paramType = dv.getUint8(24);
         return { _kind:'param_value', name, value, paramIndex, paramCount, paramType };
     },
+    27: (bytes) => {
+        // Dekoder baru untuk Sensor Mentah (Berguna di tab Preflight)
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return {
+            _kind: 'telemetry',
+            accel_x: dv.getInt16(8, true) / 1000, accel_y: dv.getInt16(10, true) / 1000, accel_z: dv.getInt16(12, true) / 1000,
+            gyro_x: dv.getInt16(14, true) / 1000, gyro_y: dv.getInt16(16, true) / 1000, gyro_z: dv.getInt16(18, true) / 1000,
+            mag_field: Math.sqrt(dv.getInt16(20, true)**2 + dv.getInt16(22, true)**2 + dv.getInt16(24, true)**2) / 1000
+        };
+    },
     30: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return { _kind:'telemetry', attitude: { roll: readF32(dv,4), pitch: readF32(dv,8), yaw: readF32(dv,12) } };
@@ -241,7 +253,8 @@ const DECODERS = {
     },
     74: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
-        return { _kind:'telemetry', speed: readF32(dv,4), climb: readF32(dv,12) };
+        // Tambahkan pembacaan Throttle (offset 18)
+        return { _kind:'telemetry', speed: readF32(dv,4), climb: readF32(dv,12), throttle: dv.getUint16(18, true) };
     },
     24: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
