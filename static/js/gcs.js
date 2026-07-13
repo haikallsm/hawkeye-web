@@ -30,18 +30,17 @@ function adaptRadioTelemetry(raw) {
         heading             : raw.heading ?? 0,
         speed               : raw.speed ?? 0,
         climb               : raw.climb ?? 0,
-        throttle            : raw.throttle ?? 0,    // <--- Tambahan
+        throttle            : raw.throttle ?? 0,
         satellites_visible  : raw.satellites_visible ?? 0,
         gps_fix_type        : raw.gps_fix_type ?? 0,
         battery_voltage     : raw.battery_voltage ?? 0,
-        battery_current     : raw.battery_current ?? 0, // <--- Tambahan
+        battery_current     : raw.battery_current ?? 0,
         battery_remaining   : raw.battery_remaining ?? -1,
         is_armed            : raw.armed ?? false,
         arm_mode            : raw.armed ? 'ARMED' : 'DISARMED',
         flight_mode         : raw.mode ?? 'UNKNOWN',
         status              : raw.connected ? 'connected' : 'disconnected',
         
-        // <--- Tambahan Data Sensor IMU untuk Preflight
         accel_x: raw.accel_x, accel_y: raw.accel_y, accel_z: raw.accel_z,
         gyro_x: raw.gyro_x, gyro_y: raw.gyro_y, gyro_z: raw.gyro_z,
         mag_field: raw.mag_field,
@@ -106,8 +105,7 @@ class GCSApiClient {
         });
 
         this.ws.on('disconnect', () => {
-            console.log('❌ Socket.io Terputus');
-            // Auto-reconnect sudah ditangani secara otomatis oleh Socket.IO secara internal!
+            console.log('Socket.io Terputus');
         });
     }
 
