@@ -25,30 +25,32 @@ function mavlinkCrc16Update(crc, byte) {
     return ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xFFFF;
 }
 
-// CRC_EXTRA per message ID -- konstanta resmi dari dialect common.xml.
+// CRC_EXTRA per message ID -- SEMUA nilai di bawah diverifikasi langsung dari
+// pymavlink.dialects.v20.common (mavlink_map[id].crc_extra), bukan dihitung
+// manual/ditebak. Jangan ubah nilai ini tanpa verifikasi ulang ke sumber resmi --
+// CRC_EXTRA yang salah membuat frame di-drop diam-diam tanpa error apapun.
 const CRC_EXTRA = {
-    0: 50,    // HEARTBEAT
-    1: 124,   // SYS_STATUS
-    20: 214,  // PARAM_REQUEST_READ
-    21: 99,   // PARAM_REQUEST_LIST
-    22: 220,  // PARAM_VALUE
-    23: 158,  // PARAM_SET
-    24: 24,   // GPS_RAW_INT
-    30: 39,   // ATTITUDE
-    33: 104,  // GLOBAL_POSITION_INT
-    39: 49,   // MISSION_ITEM (v1)
-    40: 84,   // MISSION_REQUEST
-    43: 103,  // MISSION_REQUEST_LIST
-    44: 126,  // MISSION_COUNT
-    47: 31,   // MISSION_ACK
-    66: 148,  // REQUEST_DATA_STREAM
-    73: 89,   // MISSION_ITEM_INT
-    74: 20,   // VFR_HUD
-    75: 143,  // COMMAND_INT
-    76: 152,  // COMMAND_LONG
-    77: 143,  // COMMAND_ACK
-    183: 85,  // SET_SERVO
-    253: 83,  // STATUSTEXT
+    0: 50,     // HEARTBEAT
+    1: 124,    // SYS_STATUS
+    20: 214,   // PARAM_REQUEST_READ
+    21: 159,   // PARAM_REQUEST_LIST
+    22: 220,   // PARAM_VALUE
+    23: 168,   // PARAM_SET
+    24: 24,    // GPS_RAW_INT
+    30: 39,    // ATTITUDE
+    33: 104,   // GLOBAL_POSITION_INT
+    43: 132,   // MISSION_REQUEST_LIST
+    44: 221,   // MISSION_COUNT
+    47: 153,   // MISSION_ACK
+    51: 196,   // MISSION_REQUEST_INT (pengganti modern MISSION_REQUEST lama)
+    66: 148,   // REQUEST_DATA_STREAM
+    73: 38,    // MISSION_ITEM_INT
+    74: 20,    // VFR_HUD
+    76: 152,   // COMMAND_LONG
+    77: 143,   // COMMAND_ACK
+    183: 85,   // MAV_CMD_DO_SET_SERVO -- BUKAN message ID asli, dikirim lewat COMMAND_LONG(76).
+               // Entry ini sengaja TIDAK dipakai untuk encode/decode frame langsung.
+    253: 83,   // STATUSTEXT
 };
 
 // MAV_DATA_STREAM yang di-request
@@ -197,8 +199,10 @@ function readU32(dv, off) { return dv.getUint32(off, true); }
 function readI32(dv, off) { return dv.getInt32(off, true); }
 function readU16(dv, off) { return dv.getUint16(off, true); }
 
-const MAV_TYPE_COPTER_SET = new Set([2, 13, 14]);
+const MAV_TYPE_ROVER = 10;
+const MAV_TYPE_COPTER_SET = new Set([2, 13, 14]); // QUADROTOR, HEXAROTOR-ish umum ArduCopter
 const COPTER_MODE_MAP = { 0:'STABILIZE',2:'ALT_HOLD',3:'AUTO',4:'GUIDED',5:'LOITER',6:'RTL',9:'LAND',16:'POSHOLD',20:'GUIDED_NOGPS' };
+const ROVER_MODE_MAP = { 0:'MANUAL',3:'STEERING',4:'HOLD',5:'LOITER',10:'AUTO',11:'RTL',15:'GUIDED' };
 
 const DECODERS = {
     0: (bytes) => {
@@ -207,22 +211,25 @@ const DECODERS = {
         const type = dv.getUint8(4);
         const base_mode = dv.getUint8(6);
         const armed = (base_mode & 0x80) !== 0;
-        const vehicle_type = MAV_TYPE_COPTER_SET.has(type) ? 'COPTER' : 'UNKNOWN';
-        return { _kind:'telemetry', armed, vehicle_type, mode: COPTER_MODE_MAP[custom_mode] || `MODE_${custom_mode}` };
+        const vehicle_type = type === MAV_TYPE_ROVER ? 'ROVER' : (MAV_TYPE_COPTER_SET.has(type) ? 'COPTER' : 'UNKNOWN');
+        const modeMap = vehicle_type === 'ROVER' ? ROVER_MODE_MAP : COPTER_MODE_MAP;
+        return { _kind:'telemetry', armed, vehicle_type, mode: modeMap[custom_mode] || `MODE_${custom_mode}` };
     },
     1: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return { _kind:'telemetry', battery_voltage: readU16(dv,14)/1000, battery_remaining: dv.getInt8(30) };
     },
-    22: (bytes) => { // PARAM_VALUE
+    // PARAM_VALUE (id=22) -- wire order verified: param_value(f,0), param_count(u16,4),
+    // param_index(u16,6), param_id(char[16],8), param_type(u8,24)
+    22: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
-        const paramIndex = dv.getInt16(0, true);
-        const paramCount = dv.getInt16(2, true);
-        const paramType = dv.getUint8(4);
-        const value = dv.getFloat32(5, true);
+        const value = dv.getFloat32(0, true);
+        const paramCount = dv.getUint16(4, true);
+        const paramIndex = dv.getUint16(6, true);
         let name = '';
-        for (let i=9; i<25; i++) { const c = dv.getUint8(i); if (c===0) break; name += String.fromCharCode(c); }
-        return { _kind:'param_value', paramIndex, paramCount, paramType, value, name };
+        for (let i = 8; i < 24; i++) { const c = dv.getUint8(i); if (c === 0) break; name += String.fromCharCode(c); }
+        const paramType = dv.getUint8(24);
+        return { _kind:'param_value', name, value, paramIndex, paramCount, paramType };
     },
     30: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
@@ -240,32 +247,34 @@ const DECODERS = {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return { _kind:'telemetry', gps_fix_type: dv.getUint8(28), satellites_visible: dv.getUint8(29) };
     },
-    40: (bytes) => { // MISSION_REQUEST
-        const seq = bytes[2] | (bytes[3] << 8);
-        return { _kind:'mission_request', seq };
+    // MISSION_REQUEST_INT (id=51) -- FC minta item tertentu ke GCS (dipakai saat UPLOAD,
+    // FC yang jadi "penarik"). Wire order: seq(u16,0), target_system(1,2), target_component(1,3)
+    51: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return { _kind:'mission_request', seq: dv.getUint16(0, true) };
     },
-    44: (bytes) => { // MISSION_COUNT (response)
-        const count = bytes[2] | (bytes[3] << 8);
-        return { _kind:'mission_count', count };
+    // MISSION_COUNT (id=44) -- wire order: count(u16,0), target_system(1,2), target_component(1,3)
+    44: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return { _kind:'mission_count', count: dv.getUint16(0, true) };
     },
-    47: (bytes) => { // MISSION_ACK
+    // MISSION_ACK (id=47) -- wire order: target_system(0), target_component(1), type(2)
+    47: (bytes) => {
         return { _kind:'mission_ack', result: bytes[2] };
     },
-    73: (bytes) => { // MISSION_ITEM_INT
+    // MISSION_ITEM_INT (id=73) -- wire order verified lengkap lewat pymavlink:
+    // param1-4(f,0-16), x(i32,16), y(i32,20), z(f,24), seq(u16,28), command(u16,30),
+    // target_system(32), target_component(33), frame(34), current(35), autocontinue(36)
+    73: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
-        const seq = dv.getUint16(0, true);
-        const frame = dv.getUint8(2);
-        const command = dv.getUint16(3, true);
-        const current = dv.getUint8(5);
-        const autocontinue = dv.getUint8(6);
-        const p1 = dv.getFloat32(7, true);
-        const p2 = dv.getFloat32(11, true);
-        const p3 = dv.getFloat32(15, true);
-        const p4 = dv.getFloat32(19, true);
-        const x = dv.getInt32(23, true);
-        const y = dv.getInt32(27, true);
-        const z = dv.getFloat32(31, true);
-        return { _kind:'mission_item', seq, frame, command, current, autocontinue, p1, p2, p3, p4, x, y, z };
+        return {
+            _kind: 'mission_item',
+            param1: dv.getFloat32(0, true), param2: dv.getFloat32(4, true),
+            param3: dv.getFloat32(8, true), param4: dv.getFloat32(12, true),
+            x: dv.getInt32(16, true), y: dv.getInt32(20, true), z: dv.getFloat32(24, true),
+            seq: dv.getUint16(28, true), command: dv.getUint16(30, true),
+            frame: dv.getUint8(34), current: dv.getUint8(35), autocontinue: dv.getUint8(36),
+        };
     },
     77: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
@@ -307,10 +316,11 @@ class RadioMavlink {
 
         // Waiters untuk command/param/mission
         this._ackWaiters = new Map();
-        this._paramWaiters = new Map();      // untuk getParam/setParam
+        this._paramWaiters = new Map();      // untuk getParam/setParam (key: nama param)
         this._paramListWaiters = [];         // untuk getAllParams
-        this._missionWaiters = new Map();    // untuk uploadMission
-        this._missionReadWaiters = [];       // untuk readMission
+        this._missionUpload = null;          // state aktif uploadMission() (FC yang menarik item)
+        this._missionCountWaiter = null;     // waiter MISSION_COUNT saat downloadMission()
+        this._missionItemWaiter = null;      // waiter MISSION_ITEM_INT per-seq saat downloadMission()
 
         // Callback publik
         this.onTelemetry = null;
@@ -471,141 +481,168 @@ class RadioMavlink {
     // ============================================================
     // PARAMETER
     // ============================================================
+    // Encode nama parameter jadi char[16] MAVLink (dipotong, di-pad nol)
+    _encodeParamId(name) {
+        const bytes = new Uint8Array(16);
+        bytes.set(new TextEncoder().encode(name).slice(0, 16));
+        return Array.from(bytes);
+    }
+
+    // PARAM_REQUEST_READ (id=20) wire order TERVERIFIKASI: param_index(i16,0),
+    // target_system(1,2), target_component(1,3), param_id(char[16],4).
+    // param_index=-1 (0xFFFF) berarti cari berdasarkan nama, bukan index.
     async getParam(name, timeout = 3000) {
-        const paramIdBytes = new Uint8Array(16);
-        const enc = new TextEncoder();
-        const nameBytes = enc.encode(name);
-        paramIdBytes.set(nameBytes.slice(0, 16));
-        const payload = [this.targetSystem, this.targetComponent, ...paramIdBytes, 0xFF, 0xFF];
-        const waiter = new Promise((resolve, reject) => {
+        const payload = [0xFF, 0xFF, this.targetSystem, this.targetComponent, ...this._encodeParamId(name)];
+        const promise = new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this._paramWaiters.delete(name);
                 reject(new Error(`Timeout getParam ${name}`));
             }, timeout);
-            this._paramWaiters.set(name, { resolve, timer });
+            this._paramWaiters.set(name, { resolve: (v) => { clearTimeout(timer); resolve(v); }, timer });
         });
         await this._sendFrame(20, payload, CRC_EXTRA[20]);
-        return await waiter;
+        return promise;
     }
 
+    // PARAM_SET (id=23) wire order TERVERIFIKASI: param_value(f,0), target_system(1,4),
+    // target_component(1,5), param_id(char[16],6), param_type(1,22)
     async setParam(name, value, paramType = 9, timeout = 3000) {
-        const paramIdBytes = new Uint8Array(16);
-        const enc = new TextEncoder();
-        const nameBytes = enc.encode(name);
-        paramIdBytes.set(nameBytes.slice(0, 16));
-        const buf = new ArrayBuffer(1+1+16+4+1);
+        const buf = new ArrayBuffer(23);
         const dv = new DataView(buf);
-        let off=0;
-        dv.setUint8(off, this.targetSystem); off++;
-        dv.setUint8(off, this.targetComponent); off++;
-        for (let i=0;i<16;i++) dv.setUint8(off+i, paramIdBytes[i]);
-        off += 16;
-        dv.setFloat32(off, value, true); off += 4;
-        dv.setUint8(off, paramType);
+        dv.setFloat32(0, value, true);
+        dv.setUint8(4, this.targetSystem);
+        dv.setUint8(5, this.targetComponent);
+        this._encodeParamId(name).forEach((b, i) => dv.setUint8(6 + i, b));
+        dv.setUint8(22, paramType);
         const payload = Array.from(new Uint8Array(buf));
-        const waiter = new Promise((resolve) => {
+
+        // FC membalas PARAM_SET dengan PARAM_VALUE (echo nilai yang benar-benar
+        // tersimpan) -- pakai waiter yang sama dengan getParam supaya satu jalur.
+        const promise = new Promise((resolve) => {
             const timer = setTimeout(() => {
                 this._paramWaiters.delete(name);
-                resolve(false);
+                resolve({ ok: false, reason: 'timeout' });
             }, timeout);
-            this._paramWaiters.set(name, { resolve: (v) => { clearTimeout(timer); resolve(true); }, timer });
+            this._paramWaiters.set(name, {
+                resolve: (v) => { clearTimeout(timer); resolve({ ok: true, value: v }); },
+                timer
+            });
         });
         await this._sendFrame(23, payload, CRC_EXTRA[23]);
-        return await waiter;
+        return promise;
     }
 
-    async getAllParams(timeout = 15000) {
+    // PARAM_REQUEST_LIST (id=21) -- minta semua parameter. FC (terutama
+    // ArduPilot, bisa >1000 parameter) akan membalas dengan banyak PARAM_VALUE
+    // satu-satu. Timeout dibuat ROLLING (reset tiap ada progress), bukan flat,
+    // supaya FC dengan parameter banyak tidak keburu timeout padahal masih jalan.
+    async getAllParams(onProgress, timeout = 20000) {
         return new Promise((resolve, reject) => {
-            const waiter = {
-                resolve, reject,
-                params: {},
-                total: null,
-                count: 0,
-                timer: setTimeout(() => {
+            const waiter = { resolve, reject, params: {}, total: null, count: 0, onProgress, timer: null };
+            waiter._resetTimer = () => {
+                if (waiter.timer) clearTimeout(waiter.timer);
+                waiter.timer = setTimeout(() => {
                     const idx = this._paramListWaiters.indexOf(waiter);
                     if (idx !== -1) this._paramListWaiters.splice(idx, 1);
-                    reject(new Error(`Timeout getAllParams`));
-                }, timeout)
+                    reject(new Error(`Timeout getAllParams (${waiter.count}/${waiter.total ?? '?'} diterima)`));
+                }, timeout);
             };
+            waiter._resetTimer();
             this._paramListWaiters.push(waiter);
-            const payload = [this.targetSystem, this.targetComponent];
-            this._sendFrame(21, payload, CRC_EXTRA[21]);
+            this._sendFrame(21, [this.targetSystem, this.targetComponent], CRC_EXTRA[21]);
         });
     }
 
     // ============================================================
     // MISSION
+    // Protokol MAVLink itu SEARAH-BERBEDA tergantung upload vs download:
+    // - UPLOAD : GCS kirim MISSION_COUNT -> FC MENARIK tiap item lewat
+    //            MISSION_REQUEST_INT satu-satu -> FC yang kirim MISSION_ACK
+    //            di akhir. GCS TIDAK boleh kirim item sebelum diminta.
+    // - DOWNLOAD: GCS kirim MISSION_REQUEST_LIST -> FC balas MISSION_COUNT ->
+    //            GCS MENARIK tiap item satu-satu lewat MISSION_REQUEST_INT ->
+    //            GCS yang kirim MISSION_ACK di akhir (bukan FC).
     // ============================================================
-    async uploadMission(items, timeout = 5000) {
+    async uploadMission(items, timeout = 10000) {
         const count = items.length;
-        // MISSION_COUNT
-        const countPayload = [this.targetSystem, this.targetComponent, count & 0xFF, (count >> 8) & 0xFF, 0];
-        const countOk = await this._sendMissionCountAndWait(countPayload, timeout);
-        if (!countOk) return false;
-        for (let i = 0; i < count; i++) {
-            const item = items[i];
-            const itemPayload = this._buildMissionItemPayload(i, item);
-            const req = await this._sendMissionItemAndWait(itemPayload, timeout);
-            if (!req) return false;
-        }
-        // MISSION_ACK final
-        const ackPayload = [this.targetSystem, this.targetComponent, 0,0,0];
-        await this._sendFrame(47, ackPayload, CRC_EXTRA[47]);
-        return true;
+        if (count === 0) throw new Error('Mission kosong, tidak ada yang di-upload');
+
+        return new Promise((resolve, reject) => {
+            const state = { items, resolve, reject, timer: null };
+            state.resetTimer = () => {
+                if (state.timer) clearTimeout(state.timer);
+                state.timer = setTimeout(() => {
+                    this._missionUpload = null;
+                    reject(new Error('Upload mission timeout -- FC berhenti meminta item'));
+                }, timeout);
+            };
+            state.resetTimer();
+            this._missionUpload = state;
+
+            // MISSION_COUNT (id=44) wire order: count(u16,0), target_system(1,2), target_component(1,3)
+            const countPayload = [count & 0xFF, (count >> 8) & 0xFF, this.targetSystem, this.targetComponent];
+            this._sendFrame(44, countPayload, CRC_EXTRA[44]);
+            // Setelah ini FC akan kirim MISSION_REQUEST_INT(seq) satu-satu,
+            // ditangani _handleMissionRequest() di bawah -- GCS PASIF menunggu diminta.
+        });
     }
 
+    // MISSION_ITEM_INT (id=73) wire order TERVERIFIKASI (bukan urutan deklarasi XML):
+    // param1-4(f,0-16), x(i32,16), y(i32,20), z(f,24), seq(u16,28), command(u16,30),
+    // target_system(32), target_component(33), frame(34), current(35), autocontinue(36)
     _buildMissionItemPayload(seq, item) {
-        const buf = new ArrayBuffer(1+1+2+1+2+1+1+4*4+4+4+4+1);
+        const buf = new ArrayBuffer(37);
         const dv = new DataView(buf);
-        let off=0;
-        dv.setUint8(off, this.targetSystem); off++;
-        dv.setUint8(off, this.targetComponent); off++;
-        dv.setUint16(off, seq, true); off+=2;
-        dv.setUint8(off, item.frame || 0); off++;
-        dv.setUint16(off, item.command, true); off+=2;
-        dv.setUint8(off, item.current || 0); off++;
-        dv.setUint8(off, item.autocontinue || 1); off++;
-        dv.setFloat32(off, item.param1 || 0, true); off+=4;
-        dv.setFloat32(off, item.param2 || 0, true); off+=4;
-        dv.setFloat32(off, item.param3 || 0, true); off+=4;
-        dv.setFloat32(off, item.param4 || 0, true); off+=4;
-        dv.setInt32(off, item.x || 0, true); off+=4;
-        dv.setInt32(off, item.y || 0, true); off+=4;
-        dv.setFloat32(off, item.z || 0, true); off+=4;
-        dv.setUint8(off, 0);
+        dv.setFloat32(0, item.param1 || 0, true);
+        dv.setFloat32(4, item.param2 || 0, true);
+        dv.setFloat32(8, item.param3 || 0, true);
+        dv.setFloat32(12, item.param4 || 0, true);
+        dv.setInt32(16, item.x || 0, true);
+        dv.setInt32(20, item.y || 0, true);
+        dv.setFloat32(24, item.z || 0, true);
+        dv.setUint16(28, seq, true);
+        dv.setUint16(30, item.command, true);
+        dv.setUint8(32, this.targetSystem);
+        dv.setUint8(33, this.targetComponent);
+        dv.setUint8(34, item.frame ?? 3); // default MAV_FRAME_GLOBAL_RELATIVE_ALT
+        dv.setUint8(35, item.current || 0);
+        dv.setUint8(36, item.autocontinue ?? 1);
         return Array.from(new Uint8Array(buf));
     }
 
-    _sendMissionCountAndWait(payload, timeout) {
-        return new Promise((resolve) => {
-            const timer = setTimeout(() => resolve(false), timeout);
-            const key = 'mission_count';
-            this._missionWaiters.set(key, { resolve: (ok) => { clearTimeout(timer); resolve(ok); }, timer });
-            this._sendFrame(44, payload, CRC_EXTRA[44]);
+    async downloadMission(timeout = 5000, maxRetries = 3) {
+        const count = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Timeout MISSION_REQUEST_LIST')), timeout);
+            this._missionCountWaiter = { resolve: (c) => { clearTimeout(timer); resolve(c); } };
+            this._sendFrame(43, [this.targetSystem, this.targetComponent], CRC_EXTRA[43]);
         });
-    }
 
-    _sendMissionItemAndWait(payload, timeout) {
-        return new Promise((resolve) => {
-            const timer = setTimeout(() => resolve(false), timeout);
-            const key = 'mission_item_' + payload[2];
-            this._missionWaiters.set(key, { resolve: (ok) => { clearTimeout(timer); resolve(ok); }, timer });
-            this._sendFrame(73, payload, CRC_EXTRA[73]); // MISSION_ITEM_INT
-        });
-    }
+        if (count === 0) return [];
 
-    async readMission(timeout = 5000) {
-        return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('Read mission timeout')), timeout);
-            this._missionReadWaiters.push({
-                resolve: (items) => { clearTimeout(timer); resolve(items); },
-                reject: reject,
-                items: [],
-                expected: 0
-            });
-            const payload = [this.targetSystem, this.targetComponent, 0];
-            this._sendFrame(43, payload, CRC_EXTRA[43]); // MISSION_REQUEST_LIST
-        });
+        const items = [];
+        for (let seq = 0; seq < count; seq++) {
+            let item = null;
+            for (let attempt = 0; attempt < maxRetries && !item; attempt++) {
+                try {
+                    item = await new Promise((resolve, reject) => {
+                        const timer = setTimeout(() => reject(new Error('timeout')), timeout);
+                        this._missionItemWaiter = { seq, resolve: (it) => { clearTimeout(timer); resolve(it); } };
+                        // MISSION_REQUEST_INT (id=51) wire order: seq(u16,0), target_system(1,2), target_component(1,3)
+                        const payload = [seq & 0xFF, (seq >> 8) & 0xFF, this.targetSystem, this.targetComponent];
+                        this._sendFrame(51, payload, CRC_EXTRA[51]);
+                    });
+                } catch (e) {
+                    console.warn(`[RadioMavlink] Item seq=${seq} timeout, percobaan ${attempt + 1}/${maxRetries}`);
+                }
+            }
+            if (!item) throw new Error(`Gagal ambil mission item seq=${seq} setelah ${maxRetries} percobaan`);
+            items.push(item);
+        }
+
+        // GCS yang kirim MISSION_ACK di akhir DOWNLOAD (beda dari upload, di mana FC yang kirim)
+        // MISSION_ACK (id=47) wire order: target_system(0), target_component(1), type(2)
+        await this._sendFrame(47, [this.targetSystem, this.targetComponent, 0], CRC_EXTRA[47]);
+        return items;
     }
 
     // ============================================================
@@ -742,19 +779,21 @@ class RadioMavlink {
     }
 
     _handleParamValue({ name, value, paramIndex, paramCount }) {
-        // Single waiter (getParam/setParam)
+        // Waiter tunggal (getParam/setParam)
         const waiter = this._paramWaiters.get(name);
         if (waiter) {
             this._paramWaiters.delete(name);
             waiter.resolve(value);
             return;
         }
-        // List waiter (getAllParams)
+        // Waiter list (getAllParams) -- ambil yang paling depan di antrian
         if (this._paramListWaiters.length > 0) {
             const w = this._paramListWaiters[0];
             w.params[name] = value;
             w.count++;
             w.total = paramCount;
+            w._resetTimer(); // ada progress -- perpanjang timeout, jangan flat
+            if (w.onProgress) w.onProgress(w.count, w.total, name);
             if (w.count >= w.total) {
                 clearTimeout(w.timer);
                 this._paramListWaiters.shift();
@@ -763,47 +802,53 @@ class RadioMavlink {
         }
     }
 
+    // Dipanggil saat MISSION_REQUEST_INT diterima -- FC "menarik" item tertentu
+    // selama proses upload. GCS PASIF, cuma respon begitu diminta.
     _handleMissionRequest(seq) {
-        const key = 'mission_item_' + seq;
-        const waiter = this._missionWaiters.get(key);
-        if (waiter) {
-            this._missionWaiters.delete(key);
-            waiter.resolve(true);
+        const state = this._missionUpload;
+        if (!state) return; // tidak ada upload aktif, abaikan
+        const item = state.items[seq];
+        if (!item) {
+            console.warn(`[RadioMavlink] FC minta item seq=${seq} tapi mission cuma punya ${state.items.length} item`);
+            return;
         }
+        state.resetTimer(); // ada progress -- perpanjang timeout
+        const payload = this._buildMissionItemPayload(seq, item);
+        this._sendFrame(73, payload, CRC_EXTRA[73]);
     }
 
+    // MISSION_COUNT dari FC -- konteksnya cuma satu: balasan atas
+    // MISSION_REQUEST_LIST saat downloadMission(). Saat upload, MISSION_COUNT
+    // arahnya kebalik (GCS yang kirim ke FC), jadi tidak perlu ditangani di sini.
     _handleMissionCount(count) {
-        // Saat membaca misi, kita dapat MISSION_COUNT sebagai respon dari MISSION_REQUEST_LIST
-        // Kita simpan expected count
-        if (this._missionReadWaiters.length > 0) {
-            this._missionReadWaiters[0].expected = count;
+        if (this._missionCountWaiter) {
+            const w = this._missionCountWaiter;
+            this._missionCountWaiter = null;
+            w.resolve(count);
         }
     }
 
+    // MISSION_ITEM_INT dari FC -- balasan atas MISSION_REQUEST_INT saat downloadMission()
     _handleMissionItem(item) {
-        if (this._missionReadWaiters.length > 0) {
-            const w = this._missionReadWaiters[0];
-            w.items.push(item);
-            // Kirim MISSION_ACK untuk menerima item
-            const ackPayload = [this.targetSystem, this.targetComponent, 0,0,0];
-            this._sendFrame(47, ackPayload, CRC_EXTRA[47]);
+        if (this._missionItemWaiter && this._missionItemWaiter.seq === item.seq) {
+            const w = this._missionItemWaiter;
+            this._missionItemWaiter = null;
+            w.resolve(item);
         }
     }
 
+    // MISSION_ACK dari FC -- konteksnya cuma satu: konfirmasi UPLOAD selesai
+    // (diterima/ditolak). Saat download, GCS sendiri yang kirim ACK di akhir
+    // downloadMission(), FC tidak membalas ACK untuk itu.
     _handleMissionAck(result) {
-        // Untuk upload mission: mission_count waiter
-        const key = 'mission_count';
-        const waiter = this._missionWaiters.get(key);
-        if (waiter) {
-            this._missionWaiters.delete(key);
-            waiter.resolve(result === 0);
-        }
-        // Untuk read mission: selesaikan promise
-        if (this._missionReadWaiters.length > 0) {
-            const w = this._missionReadWaiters.shift();
-            // Kita sudah kumpulkan items di _handleMissionItem
-            // Setelah MISSION_ACK, kita resolve
-            w.resolve(w.items);
+        const state = this._missionUpload;
+        if (!state) return;
+        clearTimeout(state.timer);
+        this._missionUpload = null;
+        if (result === 0) { // MAV_MISSION_ACCEPTED
+            state.resolve(true);
+        } else {
+            state.reject(new Error(`Mission ditolak FC, kode error MAV_MISSION_RESULT=${result}`));
         }
     }
 
