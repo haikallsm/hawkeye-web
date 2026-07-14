@@ -160,6 +160,7 @@ const isConnected = () => {
 };
 
 async function sendArmDisarm(cmd) {
+    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     if (cmd === 'ARM' && !confirm('Yakin ingin ARM? Pastikan propeller sudah dilepas atau area sekitar aman.')) return;
     const arm = (cmd === 'ARM');
     logToConsole(`> Sending ${cmd}...`);

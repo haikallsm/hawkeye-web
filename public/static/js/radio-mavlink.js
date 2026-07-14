@@ -317,6 +317,9 @@ class RadioMavlink {
         this.telemetry = { connected: false, source: 'radio' };
         this.logSeq = 0;
         this._statustextChunks = {};
+        this.lastHearbeat = null;
+        this._watchdogTimer = null;
+        this._linkLossTimeoutMs = 5000;
 
         this.writer = null;
         this._txSeq = 0;
@@ -386,6 +389,11 @@ class RadioMavlink {
         return this.port;
     }
 
+    isLive() {
+    return this.telemetry.connected && (Date.now() - this.lastHeartbeatTime) < this._linkLossTimeoutMs;
+    }
+
+
     async connect(baudRate = 57600) {
         if (!this.port) throw new Error('Belum ada port dipilih.');
         await this.port.open({ baudRate });
@@ -394,12 +402,30 @@ class RadioMavlink {
         this.keepReading = true;
         this._streamsRequested = false;
         this.telemetry.connected = true;
+        this.lastHeartbeatTime = Date.now(); // anggap "hidup" dulu selama grace period awal
         if (this.onConnect) this.onConnect();
         this._readLoop();
+        this._startWatchdog();              // <- tambahkan
+    }
+
+    _startWatchdog() {
+        this._stopWatchdog();
+        this._watchdogTimer = setInterval(() => {
+            if (this.telemetry.connected && !this.isLive()) {
+                console.warn('[RadioMavlink] Heartbeat timeout — link dianggap putus.');
+                this.telemetry.connected = false;
+                if (this.onDisconnect) this.onDisconnect();
+            }
+        }, 1000);
+    }
+
+    _stopWatchdog() {
+        if (this._watchdogTimer) { clearInterval(this._watchdogTimer); this._watchdogTimer = null; }
     }
 
     async disconnect() {
         this.keepReading = false;
+        this._stopWatchdog();               // <- tambahkan, cegah watchdog nyala terus setelah disconnect manual
         try {
             if (this.writer) { await this.writer.close().catch(()=>{}); this.writer = null; }
             if (this.reader) { await this.reader.cancel(); this.reader.releaseLock(); }
@@ -755,12 +781,14 @@ class RadioMavlink {
     }
 
     _handleFrame(msgId, payload, sysid, compid) {
-        // HEARTBEAT -> request streams & update target
-        if (msgId === 0 && !this._streamsRequested) {
-            this.targetSystem = sysid;
-            this.targetComponent = compid;
-            this._streamsRequested = true;
-            this.requestDataStreams().catch(e => console.warn('[RadioMavlink] requestDataStreams gagal:', e));
+        if (msgId === 0) {
+            this.lastHeartbeatTime = Date.now();   // <- tambahkan ini, di luar kondisi _streamsRequested
+            if (!this._streamsRequested) {
+                this.targetSystem = sysid;
+                this.targetComponent = compid;
+                this._streamsRequested = true;
+                this.requestDataStreams().catch(e => console.warn('[RadioMavlink] requestDataStreams gagal:', e));
+            }
         }
 
         const decoder = DECODERS[msgId];

@@ -1,6 +1,6 @@
 const commands = {
     _radioActive() {
-        return !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
+        return !!(window.radioMavlink && window.radioMavlink.isLive());
     },
     _piActive() {
         return !!(window.gcsConnection && window.gcsConnection.isConnected);
