@@ -151,18 +151,21 @@ let lastCalibMsgTime = 0;
 let currentCalibPosition = '';
 let safetyIsOff = false; 
 
-// Fungsi pembantu untuk mengambil Base URL dari Parent Iframe
 const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
-const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+const isConnected = () => {
+    if (window.parent && window.parent.mavFeatures) {
+        return window.parent.mavFeatures._radioActive() || window.parent.mavFeatures._piActive();
+    }
+    return false;
+};
 
 async function sendArmDisarm(cmd) {
-    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     if (cmd === 'ARM' && !confirm('Yakin ingin ARM? Pastikan propeller sudah dilepas atau area sekitar aman.')) return;
     const arm = (cmd === 'ARM');
     logToConsole(`> Sending ${cmd}...`);
     try {
-        const result = await window.parent.mavFeatures.armDisarm(arm);
-        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+        await window.parent.mavFeatures.armDisarm(arm);
+        logToConsole(`System: Perintah ${cmd} terkirim`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -224,11 +227,10 @@ function executeMode() {
 }
 
 async function switchFlightMode(modeName, modeCode) {
-    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     logToConsole(`> Switching flight mode to ${modeName.toUpperCase()}...`);
     try {
-        const result = await window.parent.mavFeatures.setMode(modeName);
-        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+        await window.parent.mavFeatures.setFlightMode(modeCode);
+        logToConsole(`System: Perintah mode ${modeName} terkirim`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -271,19 +273,13 @@ async function sendRTL() {
 }
 
 async function toggleSafetySwitch() {
-    // Safety switch biasanya menggunakan MAV_CMD_DO_SET_SAFETY_SWITCH = 190
-    // param1: 0=off, 1=on
-    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
-    const targetState = safetyIsOff ? 1 : 0; // 0=off, 1=on
+    // Balikkan state saat ini (jika off jadi on, dan sebaliknya)
+    const targetState = !safetyIsOff; 
     logToConsole(`> Setting safety switch to ${targetState ? 'ON' : 'OFF'}...`);
     try {
-        const result = await window.parent.mavFeatures.commandLong(190, { p1: targetState });
-        if (result.ok) {
-            safetyIsOff = !safetyIsOff;
-            logToConsole(`System: Safety ${safetyIsOff ? 'OFF' : 'ON'}`);
-        } else {
-            logToConsole(`Error: ${result.message}`);
-        }
+        await window.parent.mavFeatures.setSafetySwitch(targetState);
+        safetyIsOff = targetState;
+        logToConsole(`System: Safety ${safetyIsOff ? 'ON' : 'OFF'} command sent`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
@@ -334,27 +330,39 @@ async function toggleTransform() {
 }
 
 async function sendCalibration(cmdType) {
-    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     logToConsole(`> Sending calibration: ${cmdType}...`);
     const mav = window.parent.mavFeatures;
-    let result;
     try {
-        switch(cmdType) {
-            case 'accel_3axis': result = await mav.calibrateAccel(0); break;
-            case 'accel_level': result = await mav.calibrateLevel(); break;
-            case 'accel_simple': result = await mav.calibrateAccel(1); break;
-            default: logToConsole('Unknown calibration type'); return;
-        }
-        logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
-        if (cmdType === 'accel_3axis' && result.ok) {
+        if (cmdType === 'accel_3axis') {
+            await mav.startAccel3Axis();
             currentCalibPosition = 'level';
             document.getElementById('btnAccelNext').style.display = 'inline-block';
+        } 
+        else if (cmdType === 'accel_level') {
+            await mav.startAccelLevel();
+        } 
+        else if (cmdType === 'accel_simple') {
+            await mav.startAccelSimple();
         }
+        logToConsole(`System: Perintah kalibrasi terkirim`);
     } catch (err) {
         logToConsole(`Error: ${err.message}`);
     }
 }
 
+async function sendCalibrationNext() {
+    const btnNext = document.getElementById('btnAccelNext');
+    if (btnNext) btnNext.style.display = 'none'; 
+
+    logToConsole(`> Mengirim konfirmasi (ACK) untuk langkah ini...`);
+    try {
+        await window.parent.mavFeatures.nextAccelStep();
+        logToConsole(`System: Posisi dikonfirmasi`);
+    } catch (err) {
+        logToConsole(`Error: ${err.message}`);
+        if (btnNext) btnNext.style.display = 'inline-block';
+    }
+}
 
 const COMPASS_ENDPOINT_MAP = {
     'compass_start' : '/command/calibrate/compass/start',
@@ -365,21 +373,23 @@ const COMPASS_ENDPOINT_MAP = {
 let compassStatusPollTimer = null;
 
 async function sendCompassCalibration(cmdType) {
-    if (!isConnected()) { alert('Flight Controller is not connected.'); return; }
     const mav = window.parent.mavFeatures;
     try {
         if (cmdType === 'compass_start') {
-            const result = await mav.calibrateMag(-1); // semua kompas
-            logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
-            if (result.ok) startCompassStatusPolling();
-        } else if (cmdType === 'compass_accept') {
-            // Accept di sisi GCS hanya menghentikan polling dan mencatat
+            await mav.startCompassCal();
+            logToConsole('System: Compass calibration started');
+            startCompassStatusPolling(); 
+        } 
+        else if (cmdType === 'compass_accept') {
+            await mav.acceptCompassCal();
             stopCompassStatusPolling();
-            logToConsole('✓ Compass calibration accepted (GCS side).');
-            document.getElementById('btnRebootFC').style.display = 'inline-block';
-        } else if (cmdType === 'compass_cancel') {
-            const result = await mav.commandLong(241, { p3: 0 }); // cancel calibration
-            logToConsole(result.ok ? `System: ${result.message}` : `Error: ${result.message}`);
+            logToConsole('✓ Compass calibration accepted.');
+            const btnReboot = document.getElementById('btnRebootFC');
+            if (btnReboot) btnReboot.style.display = 'inline-block';
+        } 
+        else if (cmdType === 'compass_cancel') {
+            await mav.cancelCompassCal();
+            logToConsole('System: Compass calibration cancelled');
             stopCompassStatusPolling();
             resetMagProgressUI();
         }
@@ -456,33 +466,6 @@ async function fetchCompassStatus() {
         if (status.state === 'IDLE' || status.state === 'SUCCESS') stopCompassStatusPolling();
 
     } catch (err) {}
-}
-
-async function sendCalibrationNext() {
-    const btnNext = document.getElementById('btnAccelNext');
-    if (btnNext) btnNext.style.display = 'none'; 
-
-    const pos = currentCalibPosition || 'step';
-    logToConsole(`> Mengirim konfirmasi (ACK) untuk: ${pos.toUpperCase()}...`);
-
-    try {
-        const response = await fetch(getBaseUrl() + '/command/calibrate/next', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ position: pos })
-        });
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            logToConsole(`> System: ${data.message}`);
-        } else {
-            logToConsole(`Error: FC menolak konfirmasi. (${data.message})`);
-            if (btnNext) btnNext.style.display = 'inline-block'; 
-        }
-    } catch (err) {
-        logToConsole(`Error jaringan: ${err.message}`);
-        if (btnNext) btnNext.style.display = 'inline-block';
-    }
 }
 
 function logToConsole(text) {

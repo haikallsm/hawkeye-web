@@ -426,9 +426,18 @@ class RadioMavlink {
         console.log(`[RadioMavlink] Streams requested @ ${rateHz}Hz`);
     }
 
-    // ============================================================
-    // COMMAND_LONG
-    // ============================================================
+    async sendCommandAck(command, result = 1) {
+        // ID 77: COMMAND_ACK. Panjang payload dasar: 3 bytes (command uint16, result uint8)
+        const buf = new ArrayBuffer(3);
+        const dv = new DataView(buf);
+        dv.setUint16(0, command, true); // MAV_CMD yang di-acknowledge
+        dv.setUint8(2, result);         // 1 = MAV_RESULT_ACCEPTED
+        
+        const payload = Array.from(new Uint8Array(buf));
+        await this._sendFrame(77, payload, CRC_EXTRA[77]);
+        console.log(`[RadioMavlink] COMMAND_ACK sent for CMD ${command}`);
+    }
+
     async sendCommandLong(command, params = {}, waitAck = true, timeout = 3000) {
         const p = { p1:0, p2:0, p3:0, p4:0, p5:0, p6:0, p7:0, ...params };
         const payload = new Uint8Array(33);
