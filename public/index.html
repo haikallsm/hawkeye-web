@@ -1,89 +1,223 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
-
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/12.16.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/12.16.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/12.16.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
-
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
-      }
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAWKEYE GCS Master</title>
+    <link rel="stylesheet" href="/static/css/navbar.css">
+    <link rel="stylesheet" href="/static/css/gcs.css">
+    <script src="/static/js/socket.io.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: #0a0a1a; }
+        iframe { border: none; width: 100%; height: 100%; flex-grow: 1; }
     </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
-    </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
+</head>
+<body>
+    
+    <div id="navbar-placeholder"></div>
 
+    <!-- Iframe tempat halaman anak (flightview, mission, dll) diputar -->
+    <iframe id="main-frame" src="/flightview.html"></iframe>
+
+    <script src="/static/js/gcs.js"></script>
+    <script src="/static/js/radio-mavlink.js"></script>
+    <script src="/static/js/command.js"></script>
     <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+        // 1. Inisialisasi Radio MAVLink
+        window.radioMavlink = new RadioMavlink();
+        window.radioMavlink.tryAutoReconnect().catch(() => {});
 
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+        // 2. PATCH BUG 1: Buat alias untuk iframe anak (config, mission, preflight)
+        // Mereka akan memanggil window.parent.mavFeatures yang sekarang merujuk ke commands
+        window.mavFeatures = window.commands;
+
+        // Memuat Navbar
+        fetch('navbar.html?v=1')
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('navbar-placeholder').innerHTML = data;
+            })
+            .catch(error => console.error('Gagal memuat navbar:', error));
+
+        let iframeReady = false;          
+        const logQueue = [];              
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const frame = document.getElementById('main-frame');
+            if (frame) {
+                frame.addEventListener('load', function() {
+                    iframeReady = true;
+                    console.log('Iframe ready');
+                    
+                    // Kirim semua log yang tertunda setelah iframe siap
+                    while (logQueue.length > 0) {
+                        const queued = logQueue.shift();
+                        if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
+                            frame.contentWindow.updateMavlogUI(queued);
+                        }
+                    }
+                });
+            }
+
+            // Timpa fungsi onMavlog dari gcs.js untuk menambahkan fitur antrean (Queue)
+            window.gcsConnection.onMavlog = (logItem) => {
+                const frame = document.getElementById('main-frame');
+                if (!iframeReady) {
+                    logQueue.push(logItem);
+                    return;
+                }
+                if (frame.contentWindow && typeof frame.contentWindow.updateMavlogUI === 'function') {
+                    frame.contentWindow.updateMavlogUI(logItem);
+                }
+            };
+
+            // ===== PATCH BUG 2: Routing data RADIO =====
+            window.radioMavlink.onTelemetry = (data) => {
+                const adaptedData = window.adaptRadioTelemetry(data);
+                
+                // Simpan ke "Otak Utama" (Global Store) agar tab Mission & Preflight tidak buta
+                if (window.gcsConnection && window.gcsConnection.telemetry) {
+                    window.gcsConnection.telemetry.updateFromApi(adaptedData);
+                }
+
+                // Dorong ke Iframe UI yang sedang aktif (Flight View)
+                const frame = document.getElementById('main-frame');
+                if (frame?.contentWindow?.updateTelemetryUI) {
+                    frame.contentWindow.updateTelemetryUI(adaptedData);
+                }
+            };
+
+            window.radioMavlink.onMavlog = (logItem) => {
+                const frame = document.getElementById('main-frame');
+                if (!iframeReady) {
+                    logQueue.push(logItem);
+                    return;
+                }
+                if (frame?.contentWindow?.updateMavlogUI) {
+                    frame.contentWindow.updateMavlogUI(logItem);
+                }
+            };
+
+            // Sinkronisasi status navbar secara periodik
+            setInterval(() => {
+                updateNavbarStatus();
+            }, 2000);
+        });
+
+        function navigateTo(url, el) {
+            document.getElementById('main-frame').src = url;
+            document.querySelectorAll('.nav-left a').forEach(a => a.classList.remove('active'));
+            if(el) el.classList.add('active');
+            const camBtn = document.getElementById('nav-camera');
+            if (url === '/flightview.html') {
+                camBtn.style.display = 'inline-block';
+            } else {
+                camBtn.style.display = 'none';
+            }
         }
-      });
+
+        function triggerCamera() {
+            const frame = document.getElementById('main-frame');
+            if (frame.contentWindow && typeof frame.contentWindow.openVideo === 'function') {
+                frame.contentWindow.openVideo();
+            }
+        }
+
+        function toggleConnType() {
+            const type = document.getElementById('connTypeSelect').value;
+            document.getElementById('serialGroup').style.display = (type === 'serial') ? 'flex' : 'none';
+            document.getElementById('ipGroup').style.display = (type === 'ip') ? 'flex' : 'none';
+            updateNavbarStatus();
+        }
+
+        async function handleSelectRadioPort() {
+            if (!window.radioMavlink) { alert('Modul radio-mavlink.js belum termuat.'); return; }
+            if (!('serial' in navigator)) {
+                alert('Browser tidak mendukung Web Serial API. Pakai Chrome/Edge di desktop.');
+                return;
+            }
+            try {
+                await window.radioMavlink.requestPort();
+                const select = document.getElementById('portSelect');
+                if (select) select.innerHTML = '<option value="selected" selected>Port radio dipilih</option>';
+            } catch (err) {
+                console.log('Pemilihan port radio dibatalkan:', err); 
+            }
+        }
+
+        async function connectRadio() {
+            const statusEl = document.getElementById('statusText');
+            if (!window.radioMavlink || !window.radioMavlink.port) {
+                alert('Pilih port radio dulu (tombol "Scan" / "Pilih Port").');
+                return;
+            }
+            const baud = parseInt(document.getElementById('baudSelect').value, 10);
+            statusEl.textContent = 'Connecting radio...';
+            try {
+                await window.radioMavlink.connect(baud);
+            } catch (err) {
+                alert('Gagal connect radio: ' + err.message);
+            }
+            updateNavbarStatus();
+        }
+
+        async function disconnectRadio() {
+            if (window.radioMavlink) {
+                await window.radioMavlink.disconnect();
+            }
+            updateNavbarStatus();
+        }
+
+        async function connectUdp() {
+            await window.gcsConnection.connectIP();
+            updateNavbarStatus();
+        }
+
+        async function disconnectUdp() {
+            await window.gcsConnection.disconnect();
+            updateNavbarStatus();
+        }
+
+        async function handleMainConnect() {
+            const type = document.getElementById('connTypeSelect').value;
+            const isRadioConnected = !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
+            const isUdpConnected = !!(window.gcsConnection && window.gcsConnection.isConnected);
+
+            if (type === 'serial') {
+                if (isRadioConnected) {
+                    await disconnectRadio();
+                } else {
+                    await connectRadio();
+                }
+            } else {
+                if (isUdpConnected) {
+                    await disconnectUdp();
+                } else {
+                    await connectUdp();
+                }
+            }
+            updateNavbarStatus();
+        }
+
+        function updateNavbarStatus() {
+            const type = document.getElementById('connTypeSelect')?.value;
+            const statusEl = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectBtn');
+            if (!statusEl || !connectBtn) return;
+
+            if (type === 'serial') {
+                const connected = !!(window.radioMavlink && window.radioMavlink.telemetry?.connected);
+                statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+                connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
+            } else {
+                const connected = !!(window.gcsConnection && window.gcsConnection.isConnected);
+                statusEl.textContent = connected ? 'UDP Connected' : 'UDP Disconnected';
+                connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
+            }
+        }
+
+        setInterval(updateNavbarStatus, 1500);
+        document.addEventListener('DOMContentLoaded', () => setTimeout(updateNavbarStatus, 500));
     </script>
-  </body>
+</body>
 </html>
