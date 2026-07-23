@@ -64,6 +64,16 @@ function adaptRadioTelemetry(raw) {
         out.gyro_x = raw.gyro_x; out.gyro_y = raw.gyro_y; out.gyro_z = raw.gyro_z;
         out.mag_field = raw.mag_field;
     }
+    // 8. RF
+    if (raw.rangefinder_distance !== undefined) out.rangefinder_distance = raw.rangefinder_distance;
+    if (raw.rangefinder_healthy !== undefined) out.rangefinder_healthy = raw.rangefinder_healthy;
+    if (raw.rangefinder_type !== undefined) out.rangefinder_type = raw.rangefinder_type;
+    
+    // 9. Telem
+    if (raw.rssi !== undefined) out.rssi = raw.rssi;
+    if (raw.remrssi !== undefined) out.remrssi = raw.remrssi;
+    if (raw.radio_noise !== undefined) out.radio_noise = raw.radio_noise;
+    if (raw.radio_txbuf !== undefined) out.radio_txbuf = raw.radio_txbuf;
 
     // Kembalikan objek yang hanya berisi data aktual
     return out;

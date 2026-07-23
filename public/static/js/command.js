@@ -31,7 +31,7 @@ const commands = {
         throw new Error('Tidak ada koneksi aktif');
     },
 
-    async setflightMode(mode) {
+    async setFlightMode(mode) {
         if (this._radioActive()) return window.radioMavlink.setMode(mode);
         if (this._piActive()) return this._piPost('/command', { cmd: 'MODE:' + mode });
         throw new Error('Tidak ada koneksi aktif');
@@ -109,7 +109,10 @@ const commands = {
     },
 
     async startAccel3Axis() {
-        if (this._radioActive()) return window.radioMavlink.sendCommandLong(241, { p5: 1.0 });
+        if (this._radioActive()){
+            window.acceptCalStep = 0;
+            return window.radioMavlink.sendCommandLong(241, { p5: 1.0 });
+        } 
         if (this._piActive()) return this._piPost('/command/calibrate', { type: 'accel_3axis' });
         throw new Error('Tidak ada koneksi aktif');
     },
@@ -127,7 +130,10 @@ const commands = {
     },
 
     async nextAccelStep() {
-        if (this._radioActive()) return window.radioMavlink.sendCommandAck(241, 1);
+        if (this._radioActive()){
+            window.acceptCalStep += 1;
+          return window.radioMavlink.sendCommandAck(window.acceptCalStep, 1);  
+        } 
         if (this._piActive()) return this._piPost('/command/calibrate/next', { position: 'next' });
         throw new Error('Tidak ada koneksi aktif');
     },

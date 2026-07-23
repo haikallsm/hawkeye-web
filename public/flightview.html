@@ -483,23 +483,46 @@ window.openVideo = async function() {
 
     try {
         // Ambil Base URL secara dinamis dari Parent Induk
-        let apiBase = window.parent.gcsConnection?.baseUrl;
+        // let apiBase = window.parent.gcsConnection?.baseUrl;
 
-        if (!apiBase || apiBase.includes('localhost') || apiBase.includes('')) {
-            const saveIp = localStorage.getItem('raspyUrl');
-            apiBase = saveIp ? saveIp : 'http://localhost:5000';
+        // if (!apiBase || apiBase.includes('localhost') || apiBase.includes('')) {
+        //     const saveIp = localStorage.getItem('raspyUrl');
+        //     apiBase = saveIp ? saveIp : 'http://localhost:5000';
+        // }
+        // let apiBase = window.location.protocol + '//' + window.location.hostname + '5000';
+        let apiBase = localStorage.getItem('raspyUrl');
+        if(!apiBase) {
+            apiBase = "https://tapered-muck-illusion.ngrok-free.dev";
         }
         console.log("[WebRTC] Using API Base URL:", apiBase);
 
         const config = {
             sdpSemantics: 'unified-plan',
-            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+            iceServers: [
+                { urls: ['stun:stun.l.google.com:19302'] },
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
         };
         pc = new RTCPeerConnection(config);
+        pc.addEventListener('iceconnectionstatechange', () => console.log("[WebRTC] ICE iceConnection State:", pc.iceConnectionState));
+        pc.addEventListener('connectionstatechange', () => console.log("[WebRTC] Connection State:", pc.connectionState));
+        pc.addEventListener('track', (evt) => console.log('[WebRTC] track diterima! kind:', evt.track.kind, '| jumlah streams:', evt.streams.length));
+
+        let inboundStream = null;
 
         pc.addEventListener('track', function(evt) {
             if (evt.track.kind === 'video') {
-                videoElement.srcObject = evt.streams[0];
+                if (evt.streams && evt.streams[0]) {
+                    videoElement.srcObject = evt.streams[0];
+                } else {
+                    if (!inboundStream) inboundStream = new MediaStream();
+                    inboundStream.addTrack(evt.track);
+                    videoElement.srcObject = inboundStream;
+                }
             }
         });
 
@@ -524,7 +547,10 @@ window.openVideo = async function() {
 
         const response = await fetch(apiBase + '/webrtc/offer', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'ngrok-skip-browser-warning': 'true'
+            },
             body: JSON.stringify({
                 sdp: pc.localDescription.sdp,
                 type: pc.localDescription.type
@@ -544,6 +570,7 @@ window.openVideo = async function() {
     } catch (err) {
         statusText.innerText = 'Connection Failed: ' + err.message;
         statusText.style.color = '#f44336';
+        alert("webRTC Connection Error: " + err.message);
     }
 }
 

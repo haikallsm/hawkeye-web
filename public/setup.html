@@ -22,17 +22,30 @@
 </div>
 
 <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const savedUrl = localStorage.getItem('raspyUrl');
+        if (savedUrl) {
+            const ipOnly = savedUrl.replace('http://', '').replace(':5000', '');
+            document.getElementById('raspiIpInput').value = ipOnly;
+        }
+    });
+
     function saveRaspiIP() {
         const ip = document.getElementById('raspiIpInput').value.trim();
         if(!ip) {
             alert("Harap masukkan IP!");
             return;
         }
-        // Atur URL backend di instance global
-        const url = `http://${ip}:5000`;
-        window.gcsConnection.setBaseUrl(url);
         
-        alert("IP Raspberry Pi berhasil diatur ke: " + url + "\nSilakan ke Navbar untuk mengkoneksikan Telemetri.");
+        const url = `http://${ip}:5000`;
+        
+        if (window.parent && window.parent.gcsConnection) {
+            window.parent.gcsConnection.setBaseUrl(url);
+        }
+        
+        localStorage.setItem('raspyUrl', url);
+        
+        alert("IP Backend/RasPi berhasil diatur ke: " + url);
     }
 </script>
 </body>

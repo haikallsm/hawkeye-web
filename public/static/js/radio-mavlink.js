@@ -44,19 +44,20 @@ const CRC_EXTRA = {
     44: 221,   // MISSION_COUNT
     47: 153,   // MISSION_ACK
     51: 196,   // MISSION_REQUEST_INT (pengganti modern MISSION_REQUEST lama)
+    40: 230,   // MISSION_REQUEST
     66: 148,   // REQUEST_DATA_STREAM
     73: 38,    // MISSION_ITEM_INT
     74: 20,    // VFR_HUD
     76: 152,   // COMMAND_LONG
     77: 143,   // COMMAND_ACK
-    183: 85,   // MAV_CMD_DO_SET_SERVO -- BUKAN message ID asli, dikirim lewat COMMAND_LONG(76).
-               // Entry ini sengaja TIDAK dipakai untuk encode/decode frame langsung.
+    109: 185,  // RADIO_STATUS
+    132: 85,   // DISTANCE_SENSOR
     253: 83,   // STATUSTEXT
 };
 
 // MAV_DATA_STREAM yang di-request
 const REQUESTED_STREAMS = [1, 2, 3, 6, 10, 11, 12];
-const STREAM_RATE_HZ = 10;
+const STREAM_RATE_HZ = 5;
 
 // ============================================================
 // 1b. Frame ENCODER
@@ -260,6 +261,10 @@ const DECODERS = {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return { _kind:'telemetry', gps_fix_type: dv.getUint8(28), satellites_visible: dv.getUint8(29) };
     },
+    40: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return { _kind:'mission_request', seq: dv.getUint16(0, true) };
+    },
     // MISSION_REQUEST_INT (id=51) -- FC minta item tertentu ke GCS (dipakai saat UPLOAD,
     // FC yang jadi "penarik"). Wire order: seq(u16,0), target_system(1,2), target_component(1,3)
     51: (bytes) => {
@@ -276,8 +281,6 @@ const DECODERS = {
         return { _kind:'mission_ack', result: bytes[2] };
     },
     // MISSION_ITEM_INT (id=73) -- wire order verified lengkap lewat pymavlink:
-    // param1-4(f,0-16), x(i32,16), y(i32,20), z(f,24), seq(u16,28), command(u16,30),
-    // target_system(32), target_component(33), frame(34), current(35), autocontinue(36)
     73: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return {
@@ -292,6 +295,30 @@ const DECODERS = {
     77: (bytes) => {
         const dv = new DataView(new Uint8Array(bytes).buffer);
         return { _kind:'command_ack', command: readU16(dv,0), result: dv.getUint8(2) };
+    },
+    132: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return {
+            _kind: 'distance_sensor',
+            min_distance: dv.getUint16(4, true),      // cm
+            max_distance: dv.getUint16(6, true),      // cm
+            current_distance: dv.getUint16(8, true),  // cm
+            type: dv.getUint8(10),
+            signal_quality: dv.getUint8(38),
+        };
+    },
+    109: (bytes) => {
+        const dv = new DataView(new Uint8Array(bytes).buffer);
+        return {
+            _kind: 'radio_status',
+            rxerrors: dv.getUint16(0, true),
+            fixedErr: dv.getUint16(2, true),
+            rssi: dv.getUint8(4),
+            remrssi: dv.getUint8(5),
+            txbuf: dv.getUint8(6),
+            noise: dv.getUint8(7),
+            remnoise: dv.getUint8(8),
+        };
     },
     253: (bytes) => {
         const severity = bytes[0];
@@ -580,11 +607,7 @@ class RadioMavlink {
         return promise;
     }
 
-    // PARAM_REQUEST_LIST (id=21) -- minta semua parameter. FC (terutama
-    // ArduPilot, bisa >1000 parameter) akan membalas dengan banyak PARAM_VALUE
-    // satu-satu. Timeout dibuat ROLLING (reset tiap ada progress), bukan flat,
-    // supaya FC dengan parameter banyak tidak keburu timeout padahal masih jalan.
-    async getAllParams(onProgress, timeout = 20000) {
+    async getAllParams(onProgress, timeout = 3000) {
         return new Promise((resolve, reject) => {
             const waiter = { resolve, reject, params: {}, total: null, count: 0, onProgress, timer: null };
             waiter._resetTimer = () => {
@@ -592,7 +615,14 @@ class RadioMavlink {
                 waiter.timer = setTimeout(() => {
                     const idx = this._paramListWaiters.indexOf(waiter);
                     if (idx !== -1) this._paramListWaiters.splice(idx, 1);
-                    reject(new Error(`Timeout getAllParams (${waiter.count}/${waiter.total ?? '?'} diterima)`));
+
+                    const receivedCount = Object.keys(waiter.params).length;
+                    if (receivedCount > 0) {
+                        console.warn(`[RadioMavlink] Timeout getAllParams, mengembalikan ${receivedCount} parameter yang diterima`);
+                        resolve(waiter.params);
+                    } else {
+                        reject(new Error(`Timeout getAllParams (${waiter.count}/${waiter.total ?? '?'} diterima)`));
+                    }
                 }, timeout);
             };
             waiter._resetTimer();
@@ -614,6 +644,7 @@ class RadioMavlink {
     async uploadMission(items, timeout = 10000) {
         const count = items.length;
         if (count === 0) throw new Error('Mission kosong, tidak ada yang di-upload');
+        if (this._missionUpload) throw new Error('Upload mission sedang berlangsung, tunggu selesai');
 
         return new Promise((resolve, reject) => {
             const state = { items, resolve, reject, timer: null };
@@ -659,13 +690,27 @@ class RadioMavlink {
     }
 
     async downloadMission(timeout = 5000, maxRetries = 3) {
-        const count = await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('Timeout MISSION_REQUEST_LIST')), timeout);
-            this._missionCountWaiter = { resolve: (c) => { clearTimeout(timer); resolve(c); } };
-            this._sendFrame(43, [this.targetSystem, this.targetComponent], CRC_EXTRA[43]);
-        });
+        console.log('[RadioMavlink] downloadMission: mengirim MISSION_REQUEST_LIST...');
+        let count;
+        try {
+            count = await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    // Jika timeout, kita anggap tidak ada misi (count=0) daripada reject
+                    console.warn('[RadioMavlink] Timeout MISSION_REQUEST_LIST, asumsikan tidak ada misi');
+                    resolve(0);
+                }, timeout);
+                this._missionCountWaiter = { resolve: (c) => { clearTimeout(timer); resolve(c); } };
+                this._sendFrame(43, [this.targetSystem, this.targetComponent], CRC_EXTRA[43]);
+            });
+        } catch (e) {
+            console.warn('[RadioMavlink] Gagal mendapatkan MISSION_COUNT:', e);
+            return [];
+        }
 
-        if (count === 0) return [];
+        if (count === 0) {
+            console.log('[RadioMavlink] Tidak ada misi di FC.');
+            return [];
+        }
 
         const items = [];
         for (let seq = 0; seq < count; seq++) {
@@ -709,8 +754,8 @@ class RadioMavlink {
         return this.sendCommandLong(21);
     }
     async setMode(modeCode) {
-        // modeCode: integer custom_mode
-        return this.sendCommandLong(176, { p1: modeCode, p2: 0 });
+        const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
+        return this.sendCommandLong(176, { p1: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, p2: modeCode });
     }
     async reboot() {
         return this.sendCommandLong(246, { p1: 1 });
@@ -792,7 +837,10 @@ class RadioMavlink {
         }
 
         const decoder = DECODERS[msgId];
-        if (!decoder) return;
+        if (!decoder) {
+            console.warn(`[RadioMavlink] Msg ID ${msgId} diterima tapi tidak ada decoder -- frame dibuang`);
+            return;
+        }
 
         const paddedPayload = new Uint8Array(255);
         paddedPayload.set(payload, 0);
@@ -824,6 +872,22 @@ class RadioMavlink {
             this._handleMissionItem(result);
         } else if (result._kind === 'mission_ack') {
             this._handleMissionAck(result.result);
+        } else if (result._kind === 'distance_sensor') {
+            const RANGEFINDER_TYPE_MAP = { 0: 'LASER', 1: 'ULTRASOUND', 2: 'INFRARED', 3: 'RADAR', 4: 'UNKNOWN' };
+            const isHealthy = result.signal_quality !== 1
+                && result.current_distance > result.min_distance
+                && result.current_distance < result.max_distance;
+
+            this.telemetry.rangefinder_distance = result.current_distance / 100;   // cm -> m
+            this.telemetry.rangefinder_healthy = isHealthy;
+            this.telemetry.rangefinder_type = RANGEFINDER_TYPE_MAP[result.type] || 'UNKNOWN';
+            if (this.onTelemetry) this.onTelemetry({ ...this.telemetry });
+        } else if (result._kind === 'radio_status') {
+            this.telemetry.rssi = Math.round((result.rssi / 254) * 100);   // <- ganti dari radio_rssi_pct
+            this.telemetry.remrssi = Math.round((result.remrssi / 254) * 100);
+            this.telemetry.radio_noise = result.noise;
+            this.telemetry.radio_txbuf = result.txbuf;
+            if (this.onTelemetry) this.onTelemetry({ ...this.telemetry });
         }
     }
 
@@ -848,7 +912,7 @@ class RadioMavlink {
         if (this._paramListWaiters.length > 0) {
             const w = this._paramListWaiters[0];
             w.params[name] = value;
-            w.count++;
+            w.count = Object.keys(w.params).length;
             w.total = paramCount;
             w._resetTimer(); // ada progress -- perpanjang timeout, jangan flat
             if (w.onProgress) w.onProgress(w.count, w.total, name);
@@ -904,9 +968,9 @@ class RadioMavlink {
         clearTimeout(state.timer);
         this._missionUpload = null;
         if (result === 0) { // MAV_MISSION_ACCEPTED
-            state.resolve(true);
+            state.resolve({ok: true});
         } else {
-            state.reject(new Error(`Mission ditolak FC, kode error MAV_MISSION_RESULT=${result}`));
+            state.resolve({ ok: false, message: `Mission ditolak FC, kode error MAV_MISSION_RESULT=${result}` });
         }
     }
 

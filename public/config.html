@@ -92,7 +92,7 @@
     <div id="tab-params" class="tab-panel">
         <div class="search-bar">
             <input type="text" id="paramSearch" placeholder="Search parameters..." onkeyup="filterParams()">
-            <button class="btn btn-secondary" onclick="loadParams()">&#128259; Refresh</button>
+            <button class="btn btn-secondary" onclick="loadParams()">Refresh</button>
         </div>
         <div class="param-table-container">
             <table class="data-table">
@@ -114,7 +114,12 @@
 <script>
 // ===== HELPER KONEKSI PARENT =====
 const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
-const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+const isConnected = () => {
+    if (window.parent && window.parent.mavFeatures) {
+        return window.parent.mavFeatures._radioActive() || window.parent.mavFeatures._piActive();
+    }
+    return window.parent.gcsConnection?.isConnected || false;
+};
 
 const COPTER_MODE_MAP = {
     'STABILIZE': 0, 'ACRO': 1, 'ALT_HOLD': 2, 'AUTO': 3, 'GUIDED': 4,
@@ -166,7 +171,7 @@ async function sendParamsToBackend(api_url, params, title, requireReboot = false
                 alert(`Beberapa nilai gagal diverifikasi:\n${fails}`);
             }
             if (requireReboot) await RebootFC();
-            else forceDownloadParamsFromFC();
+            else loadParams();
         } else {
             alert(`Error: ${data.message}`);
         }
@@ -222,15 +227,20 @@ async function savePID() {
         const mav = window.parent.mavFeatures;
         let failed = [];
         for (const p of paramsToSend) {
-            const ok = await mav.setParam(p.name, p.value);
-            if (!ok) failed.push(p.name);
+            const response = await mav.setParam(p.name, p.value);
+            if (!response || !response.ok || Math.abs(response.value - p.value) > 0.0001) {
+                failed.push(p.name);
+            } else {
+
+            }
         }
         if (failed.length === 0) {
             alert("Semua PID berhasil ditulis!");
-            forceDownloadParamsFromFC();
         } else {
             alert("Gagal menulis: " + failed.join(', '));
         }
+        btn.innerText = "Refreshing...";
+        await loadParams();
     } catch (err) {
         alert("Error: " + err.message);
     } finally {
@@ -254,11 +264,17 @@ async function saveModes() {
         let failed = [];
         for (const p of params) {
             const ok = await mav.setParam(p.name, p.value);
-            if (!ok) failed.push(p.name);
+            if (!ok) {
+                failed.push(p.name);
+            } else {
+                if (window.parent.paramCache && window.parent.paramCache.params) {
+                    window.parent.paramCache.params[p.name] = p.value;
+                }
+            }
         }
         if (failed.length === 0) {
             alert("Flight modes saved!");
-            forceDownloadParamsFromFC();
+            updateParamTableValues(window.parent.paramCache.params);
         } else {
             alert("Gagal menyimpan mode: " + failed.join(', '));
         }
@@ -295,11 +311,18 @@ async function saveParams() {
         let failed = [];
         for (const p of params) {
             const ok = await mav.setParam(p.name, p.value);
-            if (!ok) failed.push(p.name);
+            if (!ok) {
+                failed.push(p.name);
+            } else {
+                if (window.parent.paramCache && window.parent.paramCache.params) {
+                    window.parent.paramCache.params[p.name] = p.value;
+                }
+            }
         }
         if (failed.length === 0) {
             alert("Semua parameter berhasil ditulis!");
-            forceDownloadParamsFromFC();
+            updateParamTableValues(window.parent.paramCache.params);
+            refreshPIDUI();
         } else {
             alert("Gagal menulis: " + failed.join(', '));
         }
@@ -310,18 +333,16 @@ async function saveParams() {
     }
 }
 
-// (Data DEFAULT_FULL_PARAMS disingkat agar code block tidak kepanjangan. Masukkan dictionary asli dari file config.html lama Anda di sini)
-const DEFAULT_FULL_PARAMS = {"ATC_RAT_RLL_P":0.135,"ATC_RAT_PIT_P":0.135}; // <-- GANTI DENGAN DICT LENGKAP ANDA
-
-function initParamTable() {
+// Pisahkan fungsi render agar bisa dipanggil terpisah
+function renderParamRows(paramsObj) {
     const tbody = document.getElementById('paramTable');
     if (!tbody) return;
     tbody.innerHTML = ''; 
     const fragment = document.createDocumentFragment();
-    const keys = Object.keys(DEFAULT_FULL_PARAMS).sort(); 
+    const keys = Object.keys(paramsObj).sort(); 
 
     keys.forEach(key => {
-        const val = DEFAULT_FULL_PARAMS[key];
+        const val = paramsObj[key];
         const tr = document.createElement('tr');
         tr.id = 'row_' + key;
         tr.innerHTML = `
@@ -334,6 +355,36 @@ function initParamTable() {
     });
     tbody.appendChild(fragment);
 }
+
+let DEFAULT_FULL_PARAMS = {}; 
+async function initParamTable() {
+    // 1. Load parameter default dari file JSON
+    try {
+        const response = await fetch('/static/params.json?v=' + Date.now()); // Anti-cache browser
+        if (response.ok) {
+            DEFAULT_FULL_PARAMS = await response.json();
+        }
+    } catch (error) {
+        console.error("Error memuat parameter bawaan:", error);
+    }
+    
+    // Render tabel awal menggunakan default JSON
+    renderParamRows(DEFAULT_FULL_PARAMS);
+
+    // 2. Jika Cache Global sudah selesai ditarik (koneksi terjadi sebelum tab Config dibuka)
+    if (window.parent.paramCache?.loaded) {
+        updateParamTableValues(window.parent.paramCache.params);
+        refreshPIDUI(); // Auto-populate ke Tab PID Tuning
+    }
+}
+
+// 3. Listener: Jika cache ditarik saat tab Config sedang terbuka, langsung update UI!
+window.addEventListener('paramCacheUpdated', () => {
+    if (window.parent.paramCache?.loaded) {
+        updateParamTableValues(window.parent.paramCache.params);
+        refreshPIDUI(); // Update juga Tab PID secara instan
+    }
+});
 
 function updateParamTableValues(paramsObj) {
     if (!paramsObj || Object.keys(paramsObj).length === 0) return;
@@ -376,31 +427,14 @@ async function fetchParameters() {
     }
 }
 
-async function forceDownloadParamsFromFC() {
-    try {
-        // Refresh dengan meminta ulang semua parameter
-        const mav = window.parent.mavFeatures;
-        const params = await mav.getAllParams();
-        updateParamTableValues(params);
-        const count = Object.keys(params).length;
-        alert(`Parameter berhasil dimuat! (${count} item)`);
-    } catch (err) {
-        alert("Gagal memuat parameter: " + err.message);
-    }
-}
-
-// Ubah juga fungsi loadParams untuk menggunakan forceDownloadParamsFromFC
 async function loadParams() {
     if (!isConnected()) return alert("Hubungkan ke FC terlebih dahulu!");
-    const btn = document.querySelector('.btn-secondary');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = "⏳ Downloading..."; btn.disabled = true;
-    try {
-        await forceDownloadParamsFromFC();
-    } catch (err) {
-        alert("Error: " + err.message);
-    } finally {
-        btn.innerHTML = originalText; btn.disabled = false;
+    
+    await window.parent.loadAllParams(); 
+    
+    if (window.parent.paramCache?.loaded) {
+        updateParamTableValues(window.parent.paramCache.params);
+        refreshPIDUI();
     }
 }
 
@@ -412,7 +446,9 @@ function loadFromFile(event) {
     reader.onload = function(e) {
         const text = e.target.result;
         const lines = text.split('\n');
+        const NON_PARAM_KEYS = new Set(['FORMAT_VERSION']);
         let changeCount = 0;
+
 
         lines.forEach(line => {
             line = line.trim();
@@ -426,6 +462,8 @@ function loadFromFile(event) {
                 if (parts.length >= 4 && !isNaN(parts[0]) && !isNaN(parts[1])) { key = parts[2]; value = parseFloat(parts[3]); }
                 else if (parts.length >= 2) { key = parts[0]; value = parseFloat(parts[1]); }
             }
+
+            if (key && NON_PARAM_KEYS.has(key.toUpperCase())) return;
 
             if (key && !isNaN(value)) {
                 const cell = document.getElementById('val_' + key);
@@ -442,7 +480,7 @@ function loadFromFile(event) {
         });
 
         document.getElementById('paramFileInput').value = ''; 
-        if (changeCount > 0) alert(`✅ File berhasil dimuat! Ditemukan ${changeCount} angka yang berbeda (ditandai warna oranye). Klik "Write to Drone" untuk menyimpan.`);
+        if (changeCount > 0) alert(`File berhasil dimuat! Ditemukan ${changeCount} angka yang berbeda (ditandai warna oranye). Klik "Write to Drone" untuk menyimpan.`);
     };
     reader.readAsText(file);
 }
@@ -484,21 +522,22 @@ function exportParams() {
     a.click();
 }
 
-let lastConnectionState = false;
+document.addEventListener('DOMContentLoaded', async () => {
+    await initParamTable();
 
-document.addEventListener('DOMContentLoaded', () => {
-    initParamTable();
+    if (window.parent.paramCache && window.parent.paramCache.loaded) {
+        updateParamTableValues(window.parent.paramCache.params);
+        refreshPIDUI(); // Otomatis isi nilai PID
+    }
 
-    setInterval(() => {
-        const connected = isConnected();
-        
-        if (connected && !lastConnectionState) {
-            console.log("Koneksi FC Terdeteksi! Menunggu 2 detik agar FC stabil...");
-            setTimeout(() => forceDownloadParamsFromFC(), 2000);
+    window.addEventListener('paramCacheUpdated', () => {
+        if (window.parent.paramCache && window.parent.paramCache.loaded) {
+            updateParamTableValues(window.parent.paramCache.params);
+            refreshPIDUI(); // Otomatis isi nilai PID
         }
-        lastConnectionState = connected;
-    }, 1000);
+    });
 });
+
 </script>
 </body>
 </html>

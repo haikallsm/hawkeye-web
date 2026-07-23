@@ -13,6 +13,13 @@
     </style>
 </head>
 <body>
+
+    <div id="paramLoadingBanner" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(10, 10, 26, 0.8); z-index:10000; justify-content:center; align-items:center; backdrop-filter: blur(3px);">
+        <div style="background:#1a1a2e; border: 2px solid #ff9800; border-radius: 12px; padding: 30px 50px; display:flex; flex-direction:column; align-items:center; gap:20px; box-shadow: 0 15px 35px rgba(0,0,0,0.8);">
+            <div style="font-size: 32px; animation: spin 2s linear infinite;">⏳</div>
+            <span id="paramLoadingText" style="color:#ff9800; font-weight: bold; font-size: 16px; letter-spacing: 0.5px;">Getting parameters from FC...</span>
+        </div>
+    </div>    
     
     <div id="navbar-placeholder"></div>
 
@@ -21,7 +28,7 @@
 
     <script src="/static/js/gcs.js"></script>
     <script src="/static/js/radio-mavlink.js"></script>
-    <script src="/static/js/command.js"></script>
+    <script src="/static/js/command.js?v=2"></script>
     <script>
         // 1. Inisialisasi Radio MAVLink
         window.radioMavlink = new RadioMavlink();
@@ -103,6 +110,68 @@
                 updateNavbarStatus();
             }, 2000);
         });
+
+        window.paramCache = {
+            params: {},
+            loaded: false,
+            loading: false,
+            progress: { count: 0, total: null}
+        };
+
+        function showParamLoadingOverlay(show, count = 0, total = null) {
+            const el = document.getElementById('paramLoadingBanner');
+
+            if (typeof show === 'number') {
+                total = count;
+                count = show;
+                show = true;
+            }
+
+            el.style.display = show ? 'flex' : 'none';
+            if (show) {
+                const totalStr = (total && total > 0) ? ` / ${total}` : '';
+                document.getElementById('paramLoadingText').innerText = `Getting parameters from FC... (${count}${totalStr})`;
+            }
+        }
+
+        async function loadAllParams() {
+            if(window.paramCache.loading) return;
+            window.paramCache.loading = true;
+            window.paramCache.loaded = false;
+            showParamLoadingOverlay(true, 0, null);
+
+            try {
+                const params = await window.commands.getAllParams((count, total) => {
+                    window.paramCache.progress = { count, total };
+                    showParamLoadingOverlay(count, total);
+                });
+                window.paramCache.params = params;
+                window.paramCache.loaded = true;
+
+                const frame = document.getElementById('main-frame');
+                if (frame && frame.contentWindow) {
+                    frame.contentWindow.dispatchEvent(new Event('paramCacheUpdated'));
+                }
+            } catch (err) {
+                console.error('Gagal memuat parameter:', err);
+                alert('Gagal memuat parameter: ' + err.message);
+            } finally {
+                window.paramCache.loading = false;
+                showParamLoadingOverlay(false);
+            }
+
+        }
+
+        window.radioMavlink.onConnect = () => {
+            setTimeout(() => {
+                loadAllParams();
+            }, 2000);
+        };
+
+        window.radioMavlink.onDisconnect = () => {
+            window.paramCache.loaded = false;
+            window.paramCache.params = {};
+        };
 
         function navigateTo(url, el) {
             document.getElementById('main-frame').src = url;

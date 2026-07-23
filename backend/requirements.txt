@@ -1,0 +1,5 @@
+flask[async]
+flask-cors
+aiortc            # WebRTC (RTCPeerConnection, signaling, dst)
+opencv-python-headless   # baca webcam (cv2.VideoCapture) -- versi headless, tidak butuh GUI/Qt/GTK, lebih ringan buat Raspberry Pi
+av

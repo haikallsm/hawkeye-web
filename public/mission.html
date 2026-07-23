@@ -66,7 +66,12 @@
 <script>
 // ===== HELPER KONEKSI PARENT =====
 const getBaseUrl = () => window.parent.gcsConnection?.baseUrl || 'http://localhost:5000';
-const isConnected = () => window.parent.gcsConnection?.isConnected || false;
+const isConnected = () => {
+    if (window.parent && window.parent.mavFeatures) {
+        return window.parent.mavFeatures._radioActive() || window.parent.mavFeatures._piActive();
+    }
+    return window.parent.gcsConnection?.isConnected || false;
+};
 
 // ===== INISIALISASI PETA =====
 let map = L.map('map').setView([-7.25, 112.75], 13);
@@ -366,7 +371,7 @@ async function uploadMissionToFC() {
         // Konversi waypoints ke format yang diharapkan (sesuai MavlinkFeatures)
         const items = waypoints.map(wp => ({
             frame: 0, // MAV_FRAME_GLOBAL
-            command: wp.command === 'HOME' ? 0 : (wp.command === 'TAKEOFF' ? 22 : 16),
+            command: wp.command === 'HOME' ? 16 : (wp.command === 'TAKEOFF' ? 22 : 16),
             param1: wp.p1 || 0,
             param2: wp.p2 || 0,
             param3: wp.p3 || 0,
@@ -393,11 +398,11 @@ async function readMissionFromFC() {
         const originalText = btn.innerText;
         btn.innerText = 'Reading...'; btn.disabled = true;
 
-        const items = await window.parent.mavFeatures.readMission();
+        const items = await window.parent.mavFeatures.downloadMission();
         // Konversi ke format UI
         const loadedWaypoints = items.map((item, idx) => ({
             id: idx,
-            command: item.command === 16 ? 'WAYPOINT' : (item.command === 22 ? 'TAKEOFF' : 'WAYPOINT'),
+            command: idx === 0 ? 'HOME' : (item.command === 22 ? 'TAKEOFF' : 'WAYPOINT'),
             lat: item.x / 1e7,
             lon: item.y / 1e7,
             alt: item.z,
@@ -406,10 +411,7 @@ async function readMissionFromFC() {
             p3: item.param3 || 0,
             p4: item.param4 || 0
         }));
-        // Hapus HOME dulu (akan ditambahkan ulang)
         waypoints = loadedWaypoints;
-        // Tambahkan HOME jika ada di data
-        // (biasanya misi tidak punya home, jadi kita skip)
         reindexWaypoints();
         renderWaypoints();
         updateMapPath();
